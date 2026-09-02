@@ -1,10 +1,14 @@
 package handler
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+)
 
 func NewRouter(h *Handler) http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /", h.Shorten)
-	mux.HandleFunc("GET /{id}", h.Expand)
-	return mux
+	r := chi.NewRouter()
+	r.Post("/", h.Shorten)
+	r.Get("/{id}", h.Expand)
+	return r
 }
