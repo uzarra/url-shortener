@@ -54,11 +54,11 @@ func (h *Handler) Expand(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "incorrect id", http.StatusBadRequest)
 		return
 	}
-	originalUrl, err := h.svc.Expand(id)
+	originalURL, err := h.svc.Expand(id)
 	if err != nil {
 		http.Error(w, "no such id", http.StatusBadRequest)
 		return
 	}
-	w.Header().Set("Location", originalUrl)
+	w.Header().Set("Location", originalURL)
 	w.WriteHeader(http.StatusTemporaryRedirect)
 }
