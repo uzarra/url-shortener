@@ -19,12 +19,12 @@ func main() {
 		panic(err)
 	}
 	fmt.Println("POST Статус-код ", resp.Status())
-	newUrl := resp.String()
-	fmt.Printf("new url is = %s\n", newUrl)
+	newURL := resp.String()
+	fmt.Printf("new url is = %s\n", newURL)
 
 	getResp, err := client.R().
 		SetHeader("Content-Type", "text/plain").
-		Get(newUrl)
+		Get(newURL)
 	if err != nil && !errors.Is(err, resty.ErrAutoRedirectDisabled) {
 		panic(err)
 	}

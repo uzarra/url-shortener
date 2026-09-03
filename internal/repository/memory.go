@@ -18,19 +18,19 @@ func NewStorage() *Storage {
 	}
 }
 
-func (s *Storage) Save(id string, originalUrl string) error {
+func (s *Storage) Save(id string, originalURL string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.urls[id] = originalUrl
+	s.urls[id] = originalURL
 	return nil
 }
 
-func (s *Storage) Load(id string) (originalUrl string, err error) {
+func (s *Storage) Load(id string) (originalURL string, err error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	originalUrl, ok := s.urls[id]
+	originalURL, ok := s.urls[id]
 	if !ok {
 		return "", ErrNotFound
 	}
-	return originalUrl, nil
+	return originalURL, nil
 }

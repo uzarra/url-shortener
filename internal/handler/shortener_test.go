@@ -12,18 +12,18 @@ import (
 )
 
 func TestHandler_Expand_BadId(t *testing.T) {
-	badIdRequest := httptest.NewRequest(http.MethodGet, "/", nil)
+	badIDRequest := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 	handler := New(newTestShortener())
-	handler.Expand(rec, badIdRequest)
+	handler.Expand(rec, badIDRequest)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestHandler_Expand_ExpandFails(t *testing.T) {
-	badIdRequest := httptest.NewRequest(http.MethodGet, "/qwe123qw", nil)
+	badIDRequest := httptest.NewRequest(http.MethodGet, "/qwe123qw", nil)
 	rec := httptest.NewRecorder()
 	handler := New(newBadTestShortener())
-	handler.Expand(rec, badIdRequest)
+	handler.Expand(rec, badIDRequest)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 

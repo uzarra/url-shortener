@@ -7,13 +7,13 @@ import (
 )
 
 const (
-	IdLength             = 8
-	MaxIdGenerateRetries = 5
+	IDLength             = 8
+	MaxIDGenerateRetries = 5
 	Alphabet             = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 )
 
 var ErrIncorrectInput = errors.New("input is incorrect")
-var ErrIdGeneration = errors.New("id generation failed")
+var ErrIDGeneration = errors.New("id generation failed")
 
 type Repository interface {
 	Save(id string, url string) error
@@ -22,13 +22,13 @@ type Repository interface {
 
 type Shortener struct {
 	repo    Repository
-	baseUrl string
+	baseURL string
 }
 
-func NewShortener(repo Repository, baseUrl string) *Shortener {
+func NewShortener(repo Repository, baseURL string) *Shortener {
 	return &Shortener{
 		repo:    repo,
-		baseUrl: strings.TrimRight(baseUrl, "/"),
+		baseURL: strings.TrimRight(baseURL, "/"),
 	}
 }
 
@@ -36,8 +36,8 @@ func (s *Shortener) Shorten(url string) (string, error) {
 	if url == "" {
 		return "", ErrIncorrectInput
 	}
-	for range MaxIdGenerateRetries {
-		id, err := generateId()
+	for range MaxIDGenerateRetries {
+		id, err := generateID()
 		if err != nil {
 			return "", err
 		}
@@ -47,24 +47,24 @@ func (s *Shortener) Shorten(url string) (string, error) {
 		if err := s.repo.Save(id, url); err != nil {
 			return "", err
 		}
-		return s.baseUrl + "/" + id, nil
+		return s.baseURL + "/" + id, nil
 	}
-	return "", ErrIdGeneration
+	return "", ErrIDGeneration
 }
 
 func (s *Shortener) Expand(id string) (string, error) {
 	if id == "" {
 		return "", ErrIncorrectInput
 	}
-	originalUrl, err := s.repo.Load(id)
+	originalURL, err := s.repo.Load(id)
 	if err != nil {
 		return "", err
 	}
-	return originalUrl, nil
+	return originalURL, nil
 }
 
-func generateId() (string, error) {
-	buf := make([]byte, IdLength)
+func generateID() (string, error) {
+	buf := make([]byte, IDLength)
 	if _, err := rand.Read(buf); err != nil {
 		return "", err
 	}

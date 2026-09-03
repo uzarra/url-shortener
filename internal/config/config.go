@@ -1,13 +1,16 @@
 package config
 
+import "flag"
+
 type Config struct {
 	ServerAddr string
 	BaseURL    string
 }
 
 func Load() *Config {
-	return &Config{
-		ServerAddr: ":8080",
-		BaseURL:    "http://localhost:8080/",
-	}
+	config := &Config{}
+	flag.StringVar(&config.ServerAddr, "a", ":8080", "address and port to run server")
+	flag.StringVar(&config.BaseURL, "b", "http://localhost:8080/", "baseURL of shortened url")
+	flag.Parse()
+	return config
 }

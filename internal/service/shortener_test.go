@@ -11,7 +11,7 @@ import (
 func TestNewShortener(t *testing.T) {
 	type args struct {
 		repo    Repository
-		baseUrl string
+		baseURL string
 	}
 	tests := []struct {
 		name string
@@ -22,17 +22,17 @@ func TestNewShortener(t *testing.T) {
 			name: "success",
 			args: args{
 				repo:    newTestStorage(make(map[string]string)),
-				baseUrl: "http://localhost:8080/",
+				baseURL: "http://localhost:8080/",
 			},
 			want: &Shortener{
 				repo:    newTestStorage(make(map[string]string)),
-				baseUrl: "http://localhost:8080",
+				baseURL: "http://localhost:8080",
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := NewShortener(tt.args.repo, tt.args.baseUrl); !reflect.DeepEqual(got, tt.want) {
+			if got := NewShortener(tt.args.repo, tt.args.baseURL); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("NewShortener() = %v, want %v", got, tt.want)
 			}
 		})
@@ -44,7 +44,7 @@ func TestShortener_Expand(t *testing.T) {
 	mem["KEY"] = "VALUE"
 	type fields struct {
 		repo    Repository
-		baseUrl string
+		baseURL string
 	}
 	type args struct {
 		id string
@@ -60,7 +60,7 @@ func TestShortener_Expand(t *testing.T) {
 			name: "success",
 			fields: fields{
 				repo:    newTestStorage(mem),
-				baseUrl: "http://localhost:8080/",
+				baseURL: "http://localhost:8080/",
 			},
 			args: args{
 				id: "KEY",
@@ -72,7 +72,7 @@ func TestShortener_Expand(t *testing.T) {
 			name: "no such key",
 			fields: fields{
 				repo:    newTestStorage(mem),
-				baseUrl: "http://localhost:8080/",
+				baseURL: "http://localhost:8080/",
 			},
 			args: args{
 				id: "ANOTHER_KEY",
@@ -84,7 +84,7 @@ func TestShortener_Expand(t *testing.T) {
 			name: "invalid id",
 			fields: fields{
 				repo:    newTestStorage(mem),
-				baseUrl: "http://localhost:8080/",
+				baseURL: "http://localhost:8080/",
 			},
 			args: args{
 				id: "",
@@ -97,7 +97,7 @@ func TestShortener_Expand(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Shortener{
 				repo:    tt.fields.repo,
-				baseUrl: tt.fields.baseUrl,
+				baseURL: tt.fields.baseURL,
 			}
 			got, err := s.Expand(tt.args.id)
 			if (err != nil) != tt.wantErr {
@@ -114,7 +114,7 @@ func TestShortener_Expand(t *testing.T) {
 func TestShortener_Shorten(t *testing.T) {
 	type fields struct {
 		repo    Repository
-		baseUrl string
+		baseURL string
 	}
 	type args struct {
 		url string
@@ -130,7 +130,7 @@ func TestShortener_Shorten(t *testing.T) {
 			name: "success",
 			fields: fields{
 				repo:    newTestStorage(map[string]string{}),
-				baseUrl: "http://localhost:8080/",
+				baseURL: "http://localhost:8080/",
 			},
 			args: args{
 				url: "https://google.com",
@@ -143,7 +143,7 @@ func TestShortener_Shorten(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s := &Shortener{
 				repo:    tt.fields.repo,
-				baseUrl: tt.fields.baseUrl,
+				baseURL: tt.fields.baseURL,
 			}
 			got, err := s.Shorten(tt.args.url)
 			if (err != nil) != tt.wantErr {
@@ -157,7 +157,7 @@ func TestShortener_Shorten(t *testing.T) {
 	}
 }
 
-func Test_generateId(t *testing.T) {
+func Test_generateID(t *testing.T) {
 	tests := []struct {
 		name       string
 		wantLength int
@@ -171,13 +171,13 @@ func Test_generateId(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := generateId()
+			got, err := generateID()
 			if (err != nil) != tt.wantErr {
-				t.Errorf("generateId() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("generateID() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if len(got) != tt.wantLength {
-				t.Errorf("generateId() got = %v, wanted length = %v", got, tt.wantLength)
+				t.Errorf("generateID() got = %v, wanted length = %v", got, tt.wantLength)
 			}
 		})
 	}
@@ -194,19 +194,19 @@ func newTestStorage(m map[string]string) *testStorage {
 	}
 }
 
-func (t *testStorage) Save(id string, originalUrl string) error {
+func (t *testStorage) Save(id string, originalURL string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.urls[id] = originalUrl
+	t.urls[id] = originalURL
 	return nil
 }
 
-func (t *testStorage) Load(id string) (originalUrl string, err error) {
+func (t *testStorage) Load(id string) (originalURL string, err error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	originalUrl, ok := t.urls[id]
+	originalURL, ok := t.urls[id]
 	if !ok {
 		return "", errors.New("not found")
 	}
-	return originalUrl, nil
+	return originalURL, nil
 }
