@@ -2,6 +2,7 @@ package handler
 
 import (
 	"io"
+	"mime"
 	"net/http"
 	"strings"
 )
@@ -23,7 +24,7 @@ func New(svc Shortener) *Handler {
 
 func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 	contentType := r.Header.Get("Content-Type")
-	if contentType != "text/plain" {
+	if mediaType, _, err := mime.ParseMediaType(contentType); err != nil || mediaType != "text/plain" {
 		http.Error(w, "incorrect content-type", http.StatusBadRequest)
 		return
 	}
@@ -40,7 +41,7 @@ func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := h.svc.Shorten(original)
 	if err != nil {
-		http.Error(w, "couldn`t generate id", http.StatusBadRequest)
+		http.Error(w, "failed to generate id", http.StatusBadRequest)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain")

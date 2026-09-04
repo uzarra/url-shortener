@@ -8,9 +8,9 @@ type Config struct {
 }
 
 func Load() *Config {
-	config := &Config{}
-	flag.StringVar(&config.ServerAddr, "a", ":8080", "address and port to run server")
-	flag.StringVar(&config.BaseURL, "b", "http://localhost:8080/", "baseURL of shortened url")
+	cfg := &Config{}
+	flag.StringVar(&cfg.ServerAddr, "a", ":8080", "address and port to run server")
+	flag.StringVar(&cfg.BaseURL, "b", "http://localhost:8080/", "baseURL of shortened url")
 	flag.Parse()
-	return config
+	return cfg
 }
