@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"errors"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -38,7 +39,7 @@ func TestHandler_Expand(t *testing.T) {
 
 func TestHandler_Shorten_BadContentType(t *testing.T) {
 	badContentTypeRequest := httptest.NewRequest(http.MethodPost, "/", nil)
-	badContentTypeRequest.Header.Set("Content-Type", "text/plain")
+	badContentTypeRequest.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler := New(newTestShortener())
 	handler.Shorten(rec, badContentTypeRequest)
@@ -65,25 +66,26 @@ func TestHandler_Shorten_EmptyBody(t *testing.T) {
 }
 
 func TestHandler_Shorten_ShortenFails(t *testing.T) {
-	emptyBodyRequest := httptest.NewRequest(http.MethodPost, "/",
+	correctRequest := httptest.NewRequest(http.MethodPost, "/",
 		bytes.NewReader([]byte(`http://test.ru`)))
-	emptyBodyRequest.Header.Set("Content-Type", "text/plain")
+	correctRequest.Header.Set("Content-Type", "text/plain")
 	rec := httptest.NewRecorder()
 	handler := New(newBadTestShortener())
-	handler.Shorten(rec, emptyBodyRequest)
+	handler.Shorten(rec, correctRequest)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestHandler_Shorten(t *testing.T) {
 	correctRequest := httptest.NewRequest(http.MethodPost, "/",
 		bytes.NewReader([]byte(`http://test.ru`)))
-	correctRequest.Header.Set("Content-Type", "text/plain")
+	correctRequest.Header.Set("Content-Type", "text/plain; charset=utf-8")
 	rec := httptest.NewRecorder()
 	handler := New(newTestShortener())
 	handler.Shorten(rec, correctRequest)
+	mediaType, _, _ := mime.ParseMediaType(rec.Header().Get("Content-Type"))
 	assert.Equal(t, http.StatusCreated, rec.Code)
 	assert.Equal(t, "http://localhost:8080/qwe123qw", rec.Body.String())
-	assert.Equal(t, "text/plain", rec.Header().Get("Content-Type"))
+	assert.Equal(t, "text/plain", mediaType)
 }
 
 func TestNew(t *testing.T) {
