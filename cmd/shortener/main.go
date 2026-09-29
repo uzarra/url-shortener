@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/uzarra/url-shortener/internal/config"
@@ -10,7 +11,10 @@ import (
 )
 
 func main() {
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("load config: %v", err)
+	}
 	repo := repository.NewStorage()
 	svc := service.NewShortener(repo, cfg.BaseURL)
 	h := handler.New(svc)
