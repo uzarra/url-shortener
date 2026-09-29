@@ -1,11 +1,12 @@
 package main
 
 import (
-	"log"
+	stdlog "log"
 	"net/http"
 
 	"github.com/uzarra/url-shortener/internal/config"
 	"github.com/uzarra/url-shortener/internal/handler"
+	"github.com/uzarra/url-shortener/internal/logger"
 	"github.com/uzarra/url-shortener/internal/repository"
 	"github.com/uzarra/url-shortener/internal/service"
 )
@@ -13,13 +14,18 @@ import (
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("load config: %v", err)
+		stdlog.Fatalf("load config: %v", err)
+	}
+	log, err := logger.New("info")
+	if err != nil {
+		stdlog.Fatalf("init logger: %v", err)
 	}
 	repo := repository.NewStorage()
 	svc := service.NewShortener(repo, cfg.BaseURL)
 	h := handler.New(svc)
-	router := handler.NewRouter(h)
+	router := handler.NewRouter(h, log)
+	log.Info().Str("addr", cfg.ServerAddr).Msg("starting server")
 	if err := http.ListenAndServe(cfg.ServerAddr, router); err != nil {
-		panic(err)
+		log.Fatal().Err(err).Msg("server stopped")
 	}
 }
