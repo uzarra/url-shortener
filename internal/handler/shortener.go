@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"io"
 	"mime"
 	"net/http"
@@ -62,4 +63,38 @@ func (h *Handler) Expand(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Location", originalURL)
 	w.WriteHeader(http.StatusTemporaryRedirect)
+}
+
+func (h *Handler) ShortenInBody(w http.ResponseWriter, r *http.Request) {
+	contentType := r.Header.Get("Content-Type")
+	if mediaType, _, err := mime.ParseMediaType(contentType); err != nil || mediaType != "application/json" {
+		http.Error(w, "incorrect content-type", http.StatusBadRequest)
+		return
+	}
+	var request ShortenRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, "incorrect request body", http.StatusBadRequest)
+		return
+	}
+	url := strings.TrimSpace(request.URL)
+	if url == "" {
+		http.Error(w, "empty url", http.StatusBadRequest)
+		return
+	}
+	id, err := h.svc.Shorten(url)
+	if err != nil {
+		http.Error(w, "failed to generate id", http.StatusBadRequest)
+		return
+	}
+	response := ShortenResponse{
+		Result: id,
+	}
+	jsonData, err := json.Marshal(response)
+	if err != nil {
+		http.Error(w, "failed to marshal", http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	w.Write(jsonData)
 }
