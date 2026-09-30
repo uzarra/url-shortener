@@ -88,6 +88,59 @@ func TestHandler_Shorten(t *testing.T) {
 	assert.Equal(t, "text/plain", mediaType)
 }
 
+func TestHandler_ShortenInBody_BadContentType(t *testing.T) {
+	badContentTypeRequest := httptest.NewRequest(http.MethodPost, "/api/shorten",
+		bytes.NewReader([]byte(`{"url":"http://test.ru"}`)))
+	badContentTypeRequest.Header.Set("Content-Type", "text/plain")
+	rec := httptest.NewRecorder()
+	handler := New(newTestShortener())
+	handler.ShortenInBody(rec, badContentTypeRequest)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestHandler_ShortenInBody_BadJSON(t *testing.T) {
+	badJSONRequest := httptest.NewRequest(http.MethodPost, "/api/shorten",
+		bytes.NewReader([]byte(`not json`)))
+	badJSONRequest.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler := New(newTestShortener())
+	handler.ShortenInBody(rec, badJSONRequest)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestHandler_ShortenInBody_EmptyURL(t *testing.T) {
+	emptyURLRequest := httptest.NewRequest(http.MethodPost, "/api/shorten",
+		bytes.NewReader([]byte(`{"url":"  "}`)))
+	emptyURLRequest.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler := New(newTestShortener())
+	handler.ShortenInBody(rec, emptyURLRequest)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestHandler_ShortenInBody_ShortenFails(t *testing.T) {
+	correctRequest := httptest.NewRequest(http.MethodPost, "/api/shorten",
+		bytes.NewReader([]byte(`{"url":"http://test.ru"}`)))
+	correctRequest.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler := New(newBadTestShortener())
+	handler.ShortenInBody(rec, correctRequest)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestHandler_ShortenInBody(t *testing.T) {
+	correctRequest := httptest.NewRequest(http.MethodPost, "/api/shorten",
+		bytes.NewReader([]byte(`{"url":"http://test.ru"}`)))
+	correctRequest.Header.Set("Content-Type", "application/json; charset=utf-8")
+	rec := httptest.NewRecorder()
+	handler := New(newTestShortener())
+	handler.ShortenInBody(rec, correctRequest)
+	mediaType, _, _ := mime.ParseMediaType(rec.Header().Get("Content-Type"))
+	assert.Equal(t, http.StatusCreated, rec.Code)
+	assert.JSONEq(t, `{"result":"http://localhost:8080/qwe123qw"}`, rec.Body.String())
+	assert.Equal(t, "application/json", mediaType)
+}
+
 func TestNew(t *testing.T) {
 	type args struct {
 		svc Shortener
