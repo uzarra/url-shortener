@@ -24,11 +24,6 @@ func New(svc Shortener) *Handler {
 }
 
 func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
-	contentType := r.Header.Get("Content-Type")
-	if mediaType, _, err := mime.ParseMediaType(contentType); err != nil || mediaType != "text/plain" {
-		http.Error(w, "incorrect content-type", http.StatusBadRequest)
-		return
-	}
 	body, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
 	if err != nil {

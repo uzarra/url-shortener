@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"errors"
 	"fmt"
 
@@ -19,19 +21,15 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("POST Статус-код ", resp.Status())
-	newURL := resp.String()
-	fmt.Printf("new url is = %s\n", newURL)
+	printResponse("POST /", resp)
 
 	getResp, err := client.R().
 		SetHeader(contentType, "text/plain").
-		Get(newURL)
+		Get(resp.String())
 	if err != nil && !errors.Is(err, resty.ErrAutoRedirectDisabled) {
 		panic(err)
 	}
-	fmt.Println("GET Статус-код ", getResp.Status())
-	location := getResp.Header().Get("Location")
-	fmt.Printf("new location is = %s\n", location)
+	printResponse("GET /{id}", getResp)
 
 	shortenInBodyResponse, err := client.R().
 		SetHeader(contentType, "application/json").
@@ -40,6 +38,70 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("POST Статус-код ", shortenInBodyResponse.Status())
-	fmt.Printf("shortenInBodyResponse response is = %s", shortenInBodyResponse.String())
+	printResponse("POST /api/shorten обычный запрос", shortenInBodyResponse)
+
+	gzipResponse, err := client.R().
+		SetHeader(contentType, "application/json").
+		SetHeader(contentEncoding, "gzip").
+		SetHeader(acceptEncoding, "gzip").
+		SetBody(gzipBody(`{"url":"http://yandex.ru"}`)).
+		Post(endpoint + "/api/shorten")
+	if err != nil {
+		panic(err)
+	}
+	printResponse("POST /api/shorten gzip запрос + gzip ответ", gzipResponse)
+
+	acceptGzipResponse, err := client.R().
+		SetHeader(contentType, "application/json").
+		SetHeader(acceptEncoding, "gzip").
+		SetBody(`{"url":"http://yandex.ru"}`).
+		Post(endpoint + "/api/shorten")
+	if err != nil {
+		panic(err)
+	}
+	printResponse("POST /api/shorten обычный запрос + gzip ответ", acceptGzipResponse)
+
+	gzipPlainResponse, err := client.R().
+		SetHeader(contentType, "text/plain").
+		SetHeader(contentEncoding, "gzip").
+		SetHeader(acceptEncoding, "gzip").
+		SetBody(gzipBody(`http://yandex.ru`)).
+		Post(endpoint)
+	if err != nil {
+		panic(err)
+	}
+	printResponse("POST / gzip запрос text/plain", gzipPlainResponse)
+
+	gzipNoTypeResponse, err := client.R().
+		SetHeader(contentEncoding, "gzip").
+		SetHeader(acceptEncoding, "gzip").
+		SetBody(gzipBody(`http://yandex.ru`)).
+		Post(endpoint)
+	if err != nil {
+		panic(err)
+	}
+	printResponse("POST / gzip запрос без Content-Type", gzipNoTypeResponse)
+}
+
+const (
+	contentEncoding = "Content-Encoding"
+	acceptEncoding  = "Accept-Encoding"
+)
+
+func gzipBody(s string) []byte {
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	if _, err := zw.Write([]byte(s)); err != nil {
+		panic(err)
+	}
+	if err := zw.Close(); err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
+}
+
+func printResponse(name string, resp *resty.Response) {
+	fmt.Printf("%s: Статус-код %s\n", name, resp.Status())
+	fmt.Printf("  response headers = %s\n", resp.Header())
+	fmt.Printf("  response is = %s\n", resp.String())
 }
