@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	defaultAddr = ":8080"
-	defaultBase = "http://localhost:8080/"
+	defaultAddr            = ":8080"
+	defaultBase            = "http://localhost:8080/"
+	defaultFileStoragePath = "file_storage.json"
 )
 
 func resetCLI(t *testing.T, args ...string) {
@@ -45,71 +46,90 @@ func TestLoad(t *testing.T) {
 		args     []string
 		wantAddr string
 		wantBase string
+		wantFile string
 	}{
 		{
 			name:     "defaults when neither env nor flags are set",
 			wantAddr: defaultAddr,
 			wantBase: defaultBase,
+			wantFile: defaultFileStoragePath,
 		},
 		{
 			name: "env vars are used",
 			env: map[string]string{
-				"SERVER_ADDRESS": ":9090",
-				"BASE_URL":       "http://env.kz/",
+				"SERVER_ADDRESS":    ":9090",
+				"BASE_URL":          "http://env.kz/",
+				"FILE_STORAGE_PATH": "test.json",
 			},
 			wantAddr: ":9090",
 			wantBase: "http://env.kz/",
+			wantFile: "test.json",
 		},
 		{
 			name:     "flags are used when env is absent",
-			args:     []string{"-a", ":7070", "-b", "http://cli.kz/"},
+			args:     []string{"-a", ":7070", "-b", "http://cli.kz/", "-f", "flag_test.json"},
 			wantAddr: ":7070",
 			wantBase: "http://cli.kz/",
+			wantFile: "flag_test.json",
 		},
 		{
-			name:     "env for serverAddr, flag for baseUrl",
+			name:     "env for serverAddr, flag for baseUrl, flag for fileStoragePath",
 			env:      map[string]string{"SERVER_ADDRESS": ":9090"},
-			args:     []string{"-b", "http://cli.kz/"},
+			args:     []string{"-b", "http://cli.kz/", "-f", "flag_test.json"},
 			wantAddr: ":9090",
 			wantBase: "http://cli.kz/",
+			wantFile: "flag_test.json",
 		},
 		{
-			name:     "env for baseUrl, flag for serverAddr",
-			env:      map[string]string{"BASE_URL": "http://env.kz/"},
+			name:     "env for baseUrl, flag for serverAddr, env for fileStoragePath",
+			env:      map[string]string{"BASE_URL": "http://env.kz/", "FILE_STORAGE_PATH": "test.json"},
 			args:     []string{"-a", ":8090"},
 			wantAddr: ":8090",
 			wantBase: "http://env.kz/",
+			wantFile: "test.json",
 		},
 		{
 			name:     "default baseUrl",
-			args:     []string{"-a", ":8090"},
+			args:     []string{"-a", ":8090", "-f", "flag_test.json"},
 			wantAddr: ":8090",
-			wantBase: "http://localhost:8080/",
+			wantBase: defaultBase,
+			wantFile: "flag_test.json",
 		},
 		{
 			name:     "default serverAddr",
-			args:     []string{"-b", "http://cli.kz/"},
-			wantAddr: ":8080",
+			args:     []string{"-b", "http://cli.kz/", "-f", "flag_test.json"},
+			wantAddr: defaultAddr,
 			wantBase: "http://cli.kz/",
+			wantFile: "flag_test.json",
+		},
+		{
+			name:     "default fileStoragePath",
+			args:     []string{"-a", ":8090", "-b", "http://cli.kz/"},
+			wantAddr: ":8090",
+			wantBase: "http://cli.kz/",
+			wantFile: defaultFileStoragePath,
 		},
 		{
 			name: "both env vars and flags exist but env vars win",
 			env: map[string]string{
-				"SERVER_ADDRESS": ":9090",
-				"BASE_URL":       "http://env.kz/",
+				"SERVER_ADDRESS":    ":9090",
+				"BASE_URL":          "http://env.kz/",
+				"FILE_STORAGE_PATH": "test.json",
 			},
 			args: []string{
 				"-a", ":7070",
 				"-b", "http://cli.kz/",
+				"-f", "flag_test.json",
 			},
 			wantAddr: ":9090",
 			wantBase: "http://env.kz/",
+			wantFile: "test.json",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			clearEnv(t, "SERVER_ADDRESS", "BASE_URL")
+			clearEnv(t, "SERVER_ADDRESS", "BASE_URL", "FILE_STORAGE_PATH")
 			for k, v := range tt.env {
 				t.Setenv(k, v)
 			}
@@ -123,6 +143,9 @@ func TestLoad(t *testing.T) {
 			}
 			if cfg.BaseURL != tt.wantBase {
 				t.Errorf("BaseURL = %q, want %q", cfg.BaseURL, tt.wantBase)
+			}
+			if cfg.FileStoragePath != tt.wantFile {
+				t.Errorf("FileStoragePath = %q, want %q", cfg.FileStoragePath, tt.wantFile)
 			}
 		})
 	}
