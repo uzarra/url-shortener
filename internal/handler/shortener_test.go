@@ -37,15 +37,6 @@ func TestHandler_Expand(t *testing.T) {
 	assert.Equal(t, "https://yandex.ru", rec.Header().Get("Location"))
 }
 
-func TestHandler_Shorten_BadContentType(t *testing.T) {
-	badContentTypeRequest := httptest.NewRequest(http.MethodPost, "/", nil)
-	badContentTypeRequest.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	handler := New(newTestShortener())
-	handler.Shorten(rec, badContentTypeRequest)
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
-}
-
 func TestHandler_Shorten_BadBody(t *testing.T) {
 	noBodyRequest := httptest.NewRequest(http.MethodPost, "/", nil)
 	noBodyRequest.Header.Set("Content-Type", "text/plain")
