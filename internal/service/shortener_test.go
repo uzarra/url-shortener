@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/uzarra/url-shortener/internal/repository"
 )
 
 func TestNewShortener(t *testing.T) {
@@ -197,6 +199,9 @@ func newTestStorage(m map[string]string) *testStorage {
 func (t *testStorage) Save(id string, originalURL string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if _, ok := t.urls[id]; ok {
+		return repository.ErrAlreadyExists
+	}
 	t.urls[id] = originalURL
 	return nil
 }

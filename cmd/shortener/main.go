@@ -20,7 +20,10 @@ func main() {
 	if err != nil {
 		stdlog.Fatalf("init logger: %v", err)
 	}
-	repo := repository.NewStorage()
+	repo, err := repository.NewFileStorage(cfg.FileStoragePath)
+	if err != nil {
+		stdlog.Fatalf("init file storage: %v", err)
+	}
 	svc := service.NewShortener(repo, cfg.BaseURL)
 	h := handler.New(svc)
 	router := handler.NewRouter(h, log)

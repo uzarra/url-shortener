@@ -5,7 +5,10 @@ import (
 	"sync"
 )
 
-var ErrNotFound = errors.New("url not found")
+var (
+	ErrNotFound      = errors.New("url not found")
+	ErrAlreadyExists = errors.New("id already exists")
+)
 
 type Storage struct {
 	mu   sync.RWMutex
@@ -21,6 +24,9 @@ func NewStorage() *Storage {
 func (s *Storage) Save(id string, originalURL string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, ok := s.urls[id]; ok {
+		return ErrAlreadyExists
+	}
 	s.urls[id] = originalURL
 	return nil
 }

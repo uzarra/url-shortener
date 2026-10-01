@@ -4,6 +4,8 @@ import (
 	"crypto/rand"
 	"errors"
 	"strings"
+
+	"github.com/uzarra/url-shortener/internal/repository"
 )
 
 const (
@@ -41,10 +43,11 @@ func (s *Shortener) Shorten(url string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if _, err := s.repo.Load(id); err == nil {
+		err = s.repo.Save(id, url)
+		if errors.Is(err, repository.ErrAlreadyExists) {
 			continue
 		}
-		if err := s.repo.Save(id, url); err != nil {
+		if err != nil {
 			return "", err
 		}
 		return s.baseURL + "/" + id, nil
