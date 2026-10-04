@@ -3,10 +3,12 @@ package main
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/json"
 	"errors"
 	"fmt"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/uzarra/url-shortener/internal/api"
 )
 
 func main() {
@@ -31,9 +33,16 @@ func main() {
 	}
 	printResponse("GET /{id}", getResp)
 
+	shortenRequest := api.ShortenRequest{
+		URL: "http://yandex.ru",
+	}
+	shortenRequestBytes, err := json.Marshal(shortenRequest)
+	if err != nil {
+		panic(err)
+	}
 	shortenInBodyResponse, err := client.R().
 		SetHeader(contentType, "application/json").
-		SetBody(`{"url":"http://yandex.ru"}`).
+		SetBody(shortenRequestBytes).
 		Post(endpoint + "/api/shorten")
 	if err != nil {
 		panic(err)
@@ -44,7 +53,7 @@ func main() {
 		SetHeader(contentType, "application/json").
 		SetHeader(contentEncoding, "gzip").
 		SetHeader(acceptEncoding, "gzip").
-		SetBody(gzipBody(`{"url":"http://yandex.ru"}`)).
+		SetBody(gzipBody(string(shortenRequestBytes))).
 		Post(endpoint + "/api/shorten")
 	if err != nil {
 		panic(err)
@@ -54,7 +63,7 @@ func main() {
 	acceptGzipResponse, err := client.R().
 		SetHeader(contentType, "application/json").
 		SetHeader(acceptEncoding, "gzip").
-		SetBody(`{"url":"http://yandex.ru"}`).
+		SetBody(shortenRequestBytes).
 		Post(endpoint + "/api/shorten")
 	if err != nil {
 		panic(err)

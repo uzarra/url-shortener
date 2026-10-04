@@ -2,18 +2,24 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"mime"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestHandler_Expand_BadId(t *testing.T) {
 	badIDRequest := httptest.NewRequest(http.MethodGet, "/", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "")
+	badIDRequest = badIDRequest.WithContext(context.WithValue(badIDRequest.Context(), chi.RouteCtxKey, rctx))
 	rec := httptest.NewRecorder()
 	handler := New(newTestShortener())
 	handler.Expand(rec, badIDRequest)
@@ -22,14 +28,20 @@ func TestHandler_Expand_BadId(t *testing.T) {
 
 func TestHandler_Expand_ExpandFails(t *testing.T) {
 	badIDRequest := httptest.NewRequest(http.MethodGet, "/qwe123qw", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "qwe123qw")
+	badIDRequest = badIDRequest.WithContext(context.WithValue(badIDRequest.Context(), chi.RouteCtxKey, rctx))
 	rec := httptest.NewRecorder()
 	handler := New(newBadTestShortener())
 	handler.Expand(rec, badIDRequest)
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
 func TestHandler_Expand(t *testing.T) {
 	goodRequest := httptest.NewRequest(http.MethodGet, "/qwe123qw", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "qwe123qw")
+	goodRequest = goodRequest.WithContext(context.WithValue(goodRequest.Context(), chi.RouteCtxKey, rctx))
 	rec := httptest.NewRecorder()
 	handler := New(newTestShortener())
 	handler.Expand(rec, goodRequest)
@@ -63,7 +75,7 @@ func TestHandler_Shorten_ShortenFails(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler := New(newBadTestShortener())
 	handler.Shorten(rec, correctRequest)
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
 func TestHandler_Shorten(t *testing.T) {
@@ -109,6 +121,17 @@ func TestHandler_ShortenInBody_EmptyURL(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
+func TestHandler_ShortenInBody_TooLargeBody(t *testing.T) {
+	largeBody := `{"url":"http://test.ru/` + strings.Repeat("a", maxBodyBytes) + `"}`
+	tooLargeRequest := httptest.NewRequest(http.MethodPost, "/api/shorten",
+		bytes.NewReader([]byte(largeBody)))
+	tooLargeRequest.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler := New(newTestShortener())
+	handler.ShortenInBody(rec, tooLargeRequest)
+	assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
+}
+
 func TestHandler_ShortenInBody_ShortenFails(t *testing.T) {
 	correctRequest := httptest.NewRequest(http.MethodPost, "/api/shorten",
 		bytes.NewReader([]byte(`{"url":"http://test.ru"}`)))
@@ -116,7 +139,7 @@ func TestHandler_ShortenInBody_ShortenFails(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler := New(newBadTestShortener())
 	handler.ShortenInBody(rec, correctRequest)
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
 func TestHandler_ShortenInBody(t *testing.T) {

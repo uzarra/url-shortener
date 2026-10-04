@@ -2,11 +2,17 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"mime"
 	"net/http"
 	"strings"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/uzarra/url-shortener/internal/api"
 )
+
+const maxBodyBytes = 1 << 20
 
 type Shortener interface {
 	Shorten(url string) (string, error)
@@ -37,7 +43,7 @@ func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := h.svc.Shorten(original)
 	if err != nil {
-		http.Error(w, "failed to generate id", http.StatusBadRequest)
+		http.Error(w, "failed to generate id", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain")
@@ -46,14 +52,14 @@ func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Expand(w http.ResponseWriter, r *http.Request) {
-	id := strings.Trim(r.URL.Path, "/")
+	id := chi.URLParam(r, "id")
 	if id == "" {
 		http.Error(w, "incorrect id", http.StatusBadRequest)
 		return
 	}
 	originalURL, err := h.svc.Expand(id)
 	if err != nil {
-		http.Error(w, "no such id", http.StatusBadRequest)
+		http.Error(w, "no such id", http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Location", originalURL)
@@ -66,8 +72,13 @@ func (h *Handler) ShortenInBody(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "incorrect content-type", http.StatusBadRequest)
 		return
 	}
-	var request ShortenRequest
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	var request api.ShortenRequest
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+			http.Error(w, "request entity too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "incorrect request body", http.StatusBadRequest)
 		return
 	}
@@ -78,15 +89,15 @@ func (h *Handler) ShortenInBody(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := h.svc.Shorten(url)
 	if err != nil {
-		http.Error(w, "failed to generate id", http.StatusBadRequest)
+		http.Error(w, "failed to generate id", http.StatusInternalServerError)
 		return
 	}
-	response := ShortenResponse{
+	response := api.ShortenResponse{
 		Result: id,
 	}
 	jsonData, err := json.Marshal(response)
 	if err != nil {
-		http.Error(w, "failed to marshal", http.StatusBadRequest)
+		http.Error(w, "failed to marshal", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
