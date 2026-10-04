@@ -6,9 +6,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 )
+
+const validRecords = `[
+  {"uuid":"1","short_url":"4rSPg8ap","original_url":"http://yandex.ru"},
+  {"uuid":"2","short_url":"edVPg3ks","original_url":"http://ya.ru"}
+]
+`
 
 func newTestFileStorage(t *testing.T, path string) *FileStorage {
 	t.Helper()
@@ -42,7 +49,18 @@ func TestNewFileStorage(t *testing.T) {
 		{name: "file does not exist"},
 		{name: "empty file", create: true},
 		{name: "empty array", content: []byte("[]"), create: true},
+		{name: "valid records", content: []byte(validRecords), create: true},
 		{name: "invalid json", content: []byte("not json"), create: true, wantErr: true},
+		{name: "not an array", content: []byte(
+			`{"uuid":"1","short_url":"4rSPg8ap","original_url":"http://yandex.ru"}`),
+			create: true, wantErr: true},
+		{name: "unterminated array", content: []byte(
+			"[\n  " + `{"uuid":"1","short_url":"4rSPg8ap","original_url":"http://yandex.ru"}`),
+			create: true, wantErr: true},
+		{name: "duplicate short url", content: []byte("[\n  " +
+			`{"uuid":"1","short_url":"4rSPg8ap","original_url":"http://yandex.ru"},` + "\n  " +
+			`{"uuid":"2","short_url":"4rSPg8ap","original_url":"http://ya.ru"}` + "\n]\n"),
+			create: true, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -155,8 +173,51 @@ func TestFileStorage_FileFormat(t *testing.T) {
 	if perm := info.Mode().Perm(); perm != 0o644 {
 		t.Errorf("file perm = %o, want %o", perm, 0o644)
 	}
-	if _, err := os.Stat(path + ".tmp"); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("tmp file should not remain, stat error = %v", err)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	if string(data) != validRecords {
+		t.Errorf("file content =\n%s\nwant\n%s", data, validRecords)
+	}
+}
+
+func TestFileStorage_AppendToExistingFile(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{name: "empty array", content: "[]"},
+		{name: "one record per line", content: validRecords},
+		{name: "indented records", content: `[
+  {
+    "uuid": "1",
+    "short_url": "4rSPg8ap",
+    "original_url": "http://yandex.ru"
+  }
+]`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "storage.json")
+			if err := os.WriteFile(path, []byte(tt.content), 0o644); err != nil {
+				t.Fatalf("prepare file: %v", err)
+			}
+			before := len(readRecords(t, path))
+			s := newTestFileStorage(t, path)
+			if err := s.Save("newID123", "http://new.ru"); err != nil {
+				t.Fatalf("Save() error = %v", err)
+			}
+			records := readRecords(t, path)
+			if len(records) != before+1 {
+				t.Fatalf("records = %d, want %d", len(records), before+1)
+			}
+			last := records[len(records)-1]
+			want := record{UUID: strconv.Itoa(before + 1), ShortURL: "newID123", OriginalURL: "http://new.ru"}
+			if last != want {
+				t.Errorf("last record = %+v, want %+v", last, want)
+			}
+		})
 	}
 }
 
@@ -203,18 +264,14 @@ func TestNewFileStorage_DirCreateError(t *testing.T) {
 func TestFileStorage_SaveWriteError(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "storage.json")
 	s := newTestFileStorage(t, path)
-	// a directory in place of the tmp file makes os.WriteFile fail
-	if err := os.Mkdir(path+".tmp", 0o755); err != nil {
-		t.Fatalf("prepare tmp dir: %v", err)
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatalf("prepare dir: %v", err)
 	}
 	if err := s.Save("abc", "http://yandex.ru"); err == nil {
 		t.Fatal("Save() error = nil, want error")
 	}
 	if _, err := s.Load("abc"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Load() after failed Save error = %v, want %v", err, ErrNotFound)
-	}
-	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("storage file should not exist after failed Save, stat error = %v", err)
 	}
 }
 

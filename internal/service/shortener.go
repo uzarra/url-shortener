@@ -9,9 +9,9 @@ import (
 )
 
 const (
-	IDLength             = 8
-	MaxIDGenerateRetries = 5
-	Alphabet             = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	idLength             = 8
+	maxIDGenerateRetries = 5
+	alphabet             = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 )
 
 var ErrIncorrectInput = errors.New("input is incorrect")
@@ -38,7 +38,7 @@ func (s *Shortener) Shorten(url string) (string, error) {
 	if url == "" {
 		return "", ErrIncorrectInput
 	}
-	for range MaxIDGenerateRetries {
+	for range maxIDGenerateRetries {
 		id, err := generateID()
 		if err != nil {
 			return "", err
@@ -67,12 +67,12 @@ func (s *Shortener) Expand(id string) (string, error) {
 }
 
 func generateID() (string, error) {
-	buf := make([]byte, IDLength)
+	buf := make([]byte, idLength)
 	if _, err := rand.Read(buf); err != nil {
 		return "", err
 	}
 	for i, b := range buf {
-		buf[i] = Alphabet[int(b)%len(Alphabet)]
+		buf[i] = alphabet[int(b)%len(alphabet)]
 	}
 	return string(buf), nil
 }

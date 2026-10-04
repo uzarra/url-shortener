@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	ContentEncoding = "Content-Encoding"
-	ContentLength   = "Content-Length"
+	contentEncoding = "Content-Encoding"
+	contentLength   = "Content-Length"
 )
 
 var compressibleTypes = map[string]bool{
@@ -19,7 +19,7 @@ var compressibleTypes = map[string]bool{
 
 func Gzip(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if hasGzip(r.Header.Get(ContentEncoding)) {
+		if hasGzip(r.Header.Get(contentEncoding)) {
 			zr, err := gzip.NewReader(r.Body)
 			if err != nil {
 				http.Error(w, "incorrect gzip body", http.StatusBadRequest)
@@ -27,8 +27,8 @@ func Gzip(next http.Handler) http.Handler {
 			}
 			defer zr.Close()
 			r.Body = zr
-			r.Header.Del(ContentEncoding)
-			r.Header.Del(ContentLength)
+			r.Header.Del(contentEncoding)
+			r.Header.Del(contentLength)
 			r.ContentLength = -1
 		}
 
@@ -63,9 +63,9 @@ func (c *compressWriter) WriteHeader(statusCode int) {
 	}
 	c.wroteHeader = true
 	mediaType, _, _ := mime.ParseMediaType(c.Header().Get("Content-Type"))
-	if compressibleTypes[mediaType] && c.Header().Get(ContentEncoding) == "" {
-		c.Header().Set(ContentEncoding, "gzip")
-		c.Header().Del(ContentLength)
+	if compressibleTypes[mediaType] && c.Header().Get(contentEncoding) == "" {
+		c.Header().Set(contentEncoding, "gzip")
+		c.Header().Del(contentLength)
 		c.zw = gzip.NewWriter(c.ResponseWriter)
 	}
 	c.ResponseWriter.WriteHeader(statusCode)
