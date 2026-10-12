@@ -47,6 +47,7 @@ func TestLoad(t *testing.T) {
 		wantAddr string
 		wantBase string
 		wantFile string
+		wantDSN  string
 	}{
 		{
 			name:     "defaults when neither env nor flags are set",
@@ -125,11 +126,44 @@ func TestLoad(t *testing.T) {
 			wantBase: "http://env.kz/",
 			wantFile: "test.json",
 		},
+		{
+			name:     "database dsn from env",
+			env:      map[string]string{"DATABASE_DSN": "postgres://env:5432/db"},
+			wantAddr: defaultAddr,
+			wantBase: defaultBase,
+			wantFile: defaultFileStoragePath,
+			wantDSN:  "postgres://env:5432/db",
+		},
+		{
+			name:     "database dsn from flag",
+			args:     []string{"-d", "postgres://cli:5432/db"},
+			wantAddr: defaultAddr,
+			wantBase: defaultBase,
+			wantFile: defaultFileStoragePath,
+			wantDSN:  "postgres://cli:5432/db",
+		},
+		{
+			name:     "database dsn env wins over flag",
+			env:      map[string]string{"DATABASE_DSN": "postgres://env:5432/db"},
+			args:     []string{"-d", "postgres://cli:5432/db"},
+			wantAddr: defaultAddr,
+			wantBase: defaultBase,
+			wantFile: defaultFileStoragePath,
+			wantDSN:  "postgres://env:5432/db",
+		},
+		{
+			name:     "database dsn with other flags",
+			args:     []string{"-a", ":7070", "-d", "postgres://cli:5432/db"},
+			wantAddr: ":7070",
+			wantBase: defaultBase,
+			wantFile: defaultFileStoragePath,
+			wantDSN:  "postgres://cli:5432/db",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			clearEnv(t, "SERVER_ADDRESS", "BASE_URL", "FILE_STORAGE_PATH")
+			clearEnv(t, "SERVER_ADDRESS", "BASE_URL", "FILE_STORAGE_PATH", "DATABASE_DSN")
 			for k, v := range tt.env {
 				t.Setenv(k, v)
 			}
@@ -146,6 +180,9 @@ func TestLoad(t *testing.T) {
 			}
 			if cfg.FileStoragePath != tt.wantFile {
 				t.Errorf("FileStoragePath = %q, want %q", cfg.FileStoragePath, tt.wantFile)
+			}
+			if cfg.DatabaseDsn != tt.wantDSN {
+				t.Errorf("DatabaseDsn = %q, want %q", cfg.DatabaseDsn, tt.wantDSN)
 			}
 		})
 	}

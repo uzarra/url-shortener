@@ -25,7 +25,16 @@ func main() {
 		stdlog.Fatalf("init file storage: %v", err)
 	}
 	svc := service.NewShortener(repo, cfg.BaseURL)
-	h := handler.New(svc)
+	var pinger handler.Pinger
+	if cfg.DatabaseDsn != "" {
+		db, err := repository.OpenPostgres(cfg.DatabaseDsn)
+		if err != nil {
+			log.Fatal().Err(err).Msg("open db")
+		}
+		defer db.Close()
+		pinger = db
+	}
+	h := handler.New(svc, pinger)
 	router := handler.NewRouter(h, log)
 	log.Info().Str("addr", cfg.ServerAddr).Msg("starting server")
 	if err := http.ListenAndServe(cfg.ServerAddr, router); err != nil {
