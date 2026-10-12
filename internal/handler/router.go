@@ -15,5 +15,6 @@ func NewRouter(h *Handler, log zerolog.Logger) http.Handler {
 	r.Post("/", h.Shorten)
 	r.Get("/{id}", h.Expand)
 	r.Post("/api/shorten", h.ShortenInBody)
+	r.Get("/ping", h.Ping)
 	return r
 }

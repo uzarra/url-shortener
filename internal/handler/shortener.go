@@ -1,12 +1,14 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"mime"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/uzarra/url-shortener/internal/api"
@@ -19,13 +21,19 @@ type Shortener interface {
 	Expand(id string) (string, error)
 }
 
-type Handler struct {
-	svc Shortener
+type Pinger interface {
+	PingContext(ctx context.Context) error
 }
 
-func New(svc Shortener) *Handler {
+type Handler struct {
+	svc  Shortener
+	pngr Pinger
+}
+
+func New(svc Shortener, pngr Pinger) *Handler {
 	return &Handler{
-		svc: svc,
+		svc:  svc,
+		pngr: pngr,
 	}
 }
 
@@ -103,4 +111,18 @@ func (h *Handler) ShortenInBody(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	w.Write(jsonData)
+}
+
+func (h *Handler) Ping(w http.ResponseWriter, r *http.Request) {
+	if h.pngr == nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), time.Second)
+	defer cancel()
+	if err := h.pngr.PingContext(ctx); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
