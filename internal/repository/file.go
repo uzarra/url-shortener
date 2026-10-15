@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -68,7 +69,7 @@ func (s *FileStorage) restore() error {
 		if err := dec.Decode(&rec); err != nil {
 			return fmt.Errorf("decode storage record: %w", err)
 		}
-		if err := s.mem.Save(rec.ShortURL, rec.OriginalURL); err != nil {
+		if err := s.mem.Save(context.Background(), rec.ShortURL, rec.OriginalURL); err != nil {
 			return fmt.Errorf("restore record %s: %w", rec.ShortURL, err)
 		}
 		s.count++
@@ -80,10 +81,10 @@ func (s *FileStorage) restore() error {
 	return nil
 }
 
-func (s *FileStorage) Save(id string, originalURL string) error {
+func (s *FileStorage) Save(ctx context.Context, id string, originalURL string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := s.mem.Load(id); err == nil {
+	if _, err := s.mem.Load(ctx, id); err == nil {
 		return ErrAlreadyExists
 	}
 	rec := record{
@@ -95,7 +96,7 @@ func (s *FileStorage) Save(id string, originalURL string) error {
 		return err
 	}
 	s.count++
-	return s.mem.Save(id, originalURL)
+	return s.mem.Save(ctx, id, originalURL)
 }
 
 func (s *FileStorage) appendRecord(rec record) error {
@@ -132,6 +133,6 @@ func (s *FileStorage) appendRecord(rec record) error {
 	return nil
 }
 
-func (s *FileStorage) Load(id string) (string, error) {
-	return s.mem.Load(id)
+func (s *FileStorage) Load(ctx context.Context, id string) (string, error) {
+	return s.mem.Load(ctx, id)
 }

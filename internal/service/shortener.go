@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
 	"strings"
@@ -18,8 +19,8 @@ var ErrIncorrectInput = errors.New("input is incorrect")
 var ErrIDGeneration = errors.New("id generation failed")
 
 type Repository interface {
-	Save(id string, url string) error
-	Load(id string) (string, error)
+	Save(ctx context.Context, id string, url string) error
+	Load(ctx context.Context, id string) (string, error)
 }
 
 type Shortener struct {
@@ -34,7 +35,7 @@ func NewShortener(repo Repository, baseURL string) *Shortener {
 	}
 }
 
-func (s *Shortener) Shorten(url string) (string, error) {
+func (s *Shortener) Shorten(ctx context.Context, url string) (string, error) {
 	if url == "" {
 		return "", ErrIncorrectInput
 	}
@@ -43,7 +44,7 @@ func (s *Shortener) Shorten(url string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		err = s.repo.Save(id, url)
+		err = s.repo.Save(ctx, id, url)
 		if errors.Is(err, repository.ErrAlreadyExists) {
 			continue
 		}
@@ -55,11 +56,11 @@ func (s *Shortener) Shorten(url string) (string, error) {
 	return "", ErrIDGeneration
 }
 
-func (s *Shortener) Expand(id string) (string, error) {
+func (s *Shortener) Expand(ctx context.Context, id string) (string, error) {
 	if id == "" {
 		return "", ErrIncorrectInput
 	}
-	originalURL, err := s.repo.Load(id)
+	originalURL, err := s.repo.Load(ctx, id)
 	if err != nil {
 		return "", err
 	}

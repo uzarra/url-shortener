@@ -9,7 +9,7 @@ import (
 
 func TestStorage_Load(t *testing.T) {
 	s := NewStorage()
-	if err := s.Save("abc", "http://yandex.ru"); err != nil {
+	if err := s.Save(t.Context(), "abc", "http://yandex.ru"); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 	tests := []struct {
@@ -24,7 +24,7 @@ func TestStorage_Load(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := s.Load(tt.id)
+			got, err := s.Load(t.Context(), tt.id)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("Load() error = %v, want %v", err, tt.wantErr)
 			}
@@ -37,13 +37,13 @@ func TestStorage_Load(t *testing.T) {
 
 func TestStorage_SaveDuplicate(t *testing.T) {
 	s := NewStorage()
-	if err := s.Save("abc", "http://yandex.ru"); err != nil {
+	if err := s.Save(t.Context(), "abc", "http://yandex.ru"); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	if err := s.Save("abc", "http://ya.ru"); !errors.Is(err, ErrAlreadyExists) {
+	if err := s.Save(t.Context(), "abc", "http://ya.ru"); !errors.Is(err, ErrAlreadyExists) {
 		t.Fatalf("Save() duplicate error = %v, want %v", err, ErrAlreadyExists)
 	}
-	if got, _ := s.Load("abc"); got != "http://yandex.ru" {
+	if got, _ := s.Load(t.Context(), "abc"); got != "http://yandex.ru" {
 		t.Errorf("Load() = %q, want original %q", got, "http://yandex.ru")
 	}
 }
@@ -55,12 +55,12 @@ func TestStorage_SaveKeepsSeparateIDs(t *testing.T) {
 		"edVPg3ks": "http://ya.ru",
 	}
 	for id, u := range urls {
-		if err := s.Save(id, u); err != nil {
+		if err := s.Save(t.Context(), id, u); err != nil {
 			t.Fatalf("Save(%q) error = %v", id, err)
 		}
 	}
 	for id, want := range urls {
-		if got, err := s.Load(id); err != nil || got != want {
+		if got, err := s.Load(t.Context(), id); err != nil || got != want {
 			t.Errorf("Load(%q) = %q, %v, want %q, nil", id, got, err, want)
 		}
 	}
@@ -75,19 +75,19 @@ func TestStorage_Concurrent(t *testing.T) {
 		id := fmt.Sprintf("id%d", i)
 		go func() {
 			defer wg.Done()
-			if err := s.Save(id, "http://example.com"); err != nil {
+			if err := s.Save(t.Context(), id, "http://example.com"); err != nil {
 				t.Errorf("Save(%q) error = %v", id, err)
 			}
 		}()
 		go func() {
 			defer wg.Done()
-			_, _ = s.Load(id)
+			_, _ = s.Load(t.Context(), id)
 		}()
 	}
 	wg.Wait()
 	for i := range n {
 		id := fmt.Sprintf("id%d", i)
-		if _, err := s.Load(id); err != nil {
+		if _, err := s.Load(t.Context(), id); err != nil {
 			t.Errorf("Load(%q) error = %v", id, err)
 		}
 	}
@@ -105,7 +105,7 @@ func TestStorage_ConcurrentSameID(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err := s.Save("same", fmt.Sprintf("http://example.com/%d", i))
+			err := s.Save(t.Context(), "same", fmt.Sprintf("http://example.com/%d", i))
 			if err == nil {
 				mu.Lock()
 				success++

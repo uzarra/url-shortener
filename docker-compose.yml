@@ -1,0 +1,27 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: shortener
+      POSTGRES_PASSWORD: shortener
+      POSTGRES_DB: shortener
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shortener -d shortener"]
+      interval: 2s
+      retries: 15
+
+  app:
+    build: .
+    environment:
+      DATABASE_DSN: postgres://shortener:shortener@postgres:5432/shortener?sslmode=disable
+      SERVER_ADDRESS: ":8080"
+      BASE_URL: http://localhost:8080/
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/ping"]
+      interval: 2s
+      retries: 15
