@@ -17,8 +17,8 @@ import (
 const maxBodyBytes = 1 << 20
 
 type Shortener interface {
-	Shorten(url string) (string, error)
-	Expand(id string) (string, error)
+	Shorten(ctx context.Context, url string) (string, error)
+	Expand(ctx context.Context, id string) (string, error)
 }
 
 type Pinger interface {
@@ -49,7 +49,7 @@ func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "empty request body", http.StatusBadRequest)
 		return
 	}
-	id, err := h.svc.Shorten(original)
+	id, err := h.svc.Shorten(r.Context(), original)
 	if err != nil {
 		http.Error(w, "failed to generate id", http.StatusInternalServerError)
 		return
@@ -65,7 +65,7 @@ func (h *Handler) Expand(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "incorrect id", http.StatusBadRequest)
 		return
 	}
-	originalURL, err := h.svc.Expand(id)
+	originalURL, err := h.svc.Expand(r.Context(), id)
 	if err != nil {
 		http.Error(w, "no such id", http.StatusNotFound)
 		return
@@ -95,7 +95,7 @@ func (h *Handler) ShortenInBody(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "empty url", http.StatusBadRequest)
 		return
 	}
-	id, err := h.svc.Shorten(url)
+	id, err := h.svc.Shorten(r.Context(), url)
 	if err != nil {
 		http.Error(w, "failed to generate id", http.StatusInternalServerError)
 		return

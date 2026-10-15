@@ -77,7 +77,7 @@ func TestNewFileStorage(t *testing.T) {
 			if tt.wantErr {
 				return
 			}
-			if _, err := s.Load("missing"); !errors.Is(err, ErrNotFound) {
+			if _, err := s.Load(t.Context(), "missing"); !errors.Is(err, ErrNotFound) {
 				t.Errorf("Load() error = %v, want %v", err, ErrNotFound)
 			}
 		})
@@ -86,10 +86,10 @@ func TestNewFileStorage(t *testing.T) {
 
 func TestFileStorage_SaveLoad(t *testing.T) {
 	s := newTestFileStorage(t, filepath.Join(t.TempDir(), "storage.json"))
-	if err := s.Save("abc", "http://yandex.ru"); err != nil {
+	if err := s.Save(t.Context(), "abc", "http://yandex.ru"); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	got, err := s.Load("abc")
+	got, err := s.Load(t.Context(), "abc")
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -101,13 +101,13 @@ func TestFileStorage_SaveLoad(t *testing.T) {
 func TestFileStorage_SaveDuplicate(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "storage.json")
 	s := newTestFileStorage(t, path)
-	if err := s.Save("abc", "http://yandex.ru"); err != nil {
+	if err := s.Save(t.Context(), "abc", "http://yandex.ru"); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	if err := s.Save("abc", "http://ya.ru"); !errors.Is(err, ErrAlreadyExists) {
+	if err := s.Save(t.Context(), "abc", "http://ya.ru"); !errors.Is(err, ErrAlreadyExists) {
 		t.Fatalf("Save() duplicate error = %v, want %v", err, ErrAlreadyExists)
 	}
-	if got, _ := s.Load("abc"); got != "http://yandex.ru" {
+	if got, _ := s.Load(t.Context(), "abc"); got != "http://yandex.ru" {
 		t.Errorf("Load() = %q, want original %q", got, "http://yandex.ru")
 	}
 	if records := readRecords(t, path); len(records) != 1 {
@@ -124,14 +124,14 @@ func TestFileStorage_Restore(t *testing.T) {
 	}
 	s := newTestFileStorage(t, path)
 	for id, u := range urls {
-		if err := s.Save(id, u); err != nil {
+		if err := s.Save(t.Context(), id, u); err != nil {
 			t.Fatalf("Save(%q) error = %v", id, err)
 		}
 	}
 
 	restored := newTestFileStorage(t, path)
 	for id, want := range urls {
-		got, err := restored.Load(id)
+		got, err := restored.Load(t.Context(), id)
 		if err != nil {
 			t.Errorf("Load(%q) error = %v", id, err)
 			continue
@@ -145,10 +145,10 @@ func TestFileStorage_Restore(t *testing.T) {
 func TestFileStorage_FileFormat(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "storage.json")
 	s := newTestFileStorage(t, path)
-	if err := s.Save("4rSPg8ap", "http://yandex.ru"); err != nil {
+	if err := s.Save(t.Context(), "4rSPg8ap", "http://yandex.ru"); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	if err := s.Save("edVPg3ks", "http://ya.ru"); err != nil {
+	if err := s.Save(t.Context(), "edVPg3ks", "http://ya.ru"); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 
@@ -205,7 +205,7 @@ func TestFileStorage_AppendToExistingFile(t *testing.T) {
 			}
 			before := len(readRecords(t, path))
 			s := newTestFileStorage(t, path)
-			if err := s.Save("newID123", "http://new.ru"); err != nil {
+			if err := s.Save(t.Context(), "newID123", "http://new.ru"); err != nil {
 				t.Fatalf("Save() error = %v", err)
 			}
 			records := readRecords(t, path)
@@ -224,11 +224,11 @@ func TestFileStorage_AppendToExistingFile(t *testing.T) {
 func TestFileStorage_UUIDContinuesAfterRestore(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "storage.json")
 	s := newTestFileStorage(t, path)
-	_ = s.Save("a", "http://a.ru")
-	_ = s.Save("b", "http://b.ru")
+	_ = s.Save(t.Context(), "a", "http://a.ru")
+	_ = s.Save(t.Context(), "b", "http://b.ru")
 
 	restored := newTestFileStorage(t, path)
-	if err := restored.Save("c", "http://c.ru"); err != nil {
+	if err := restored.Save(t.Context(), "c", "http://c.ru"); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 	records := readRecords(t, path)
@@ -243,7 +243,7 @@ func TestFileStorage_UUIDContinuesAfterRestore(t *testing.T) {
 func TestNewFileStorage_CreatesDir(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "a", "b", "storage.json")
 	s := newTestFileStorage(t, path)
-	if err := s.Save("abc", "http://yandex.ru"); err != nil {
+	if err := s.Save(t.Context(), "abc", "http://yandex.ru"); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 	if records := readRecords(t, path); len(records) != 1 {
@@ -267,10 +267,10 @@ func TestFileStorage_SaveWriteError(t *testing.T) {
 	if err := os.Mkdir(path, 0o755); err != nil {
 		t.Fatalf("prepare dir: %v", err)
 	}
-	if err := s.Save("abc", "http://yandex.ru"); err == nil {
+	if err := s.Save(t.Context(), "abc", "http://yandex.ru"); err == nil {
 		t.Fatal("Save() error = nil, want error")
 	}
-	if _, err := s.Load("abc"); !errors.Is(err, ErrNotFound) {
+	if _, err := s.Load(t.Context(), "abc"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Load() after failed Save error = %v, want %v", err, ErrNotFound)
 	}
 }
@@ -285,7 +285,7 @@ func TestFileStorage_ConcurrentSave(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			id := fmt.Sprintf("id%d", i)
-			if err := s.Save(id, "http://example.com"); err != nil {
+			if err := s.Save(t.Context(), id, "http://example.com"); err != nil {
 				t.Errorf("Save(%q) error = %v", id, err)
 			}
 		}()

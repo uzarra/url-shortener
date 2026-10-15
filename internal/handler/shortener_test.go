@@ -226,11 +226,11 @@ func newTestShortener() Shortener {
 	return &testShortener{}
 }
 
-func (t *testShortener) Shorten(url string) (string, error) {
+func (t *testShortener) Shorten(_ context.Context, url string) (string, error) {
 	return "http://localhost:8080/qwe123qw", nil
 }
 
-func (t *testShortener) Expand(id string) (string, error) {
+func (t *testShortener) Expand(_ context.Context, id string) (string, error) {
 	return "https://yandex.ru", nil
 }
 
@@ -241,11 +241,11 @@ func newBadTestShortener() Shortener {
 	return &badTestShortener{}
 }
 
-func (t *badTestShortener) Shorten(url string) (string, error) {
+func (t *badTestShortener) Shorten(_ context.Context, url string) (string, error) {
 	return "", errors.New("bad")
 }
 
-func (t *badTestShortener) Expand(id string) (string, error) {
+func (t *badTestShortener) Expand(_ context.Context, id string) (string, error) {
 	return "", errors.New("bad")
 }
 

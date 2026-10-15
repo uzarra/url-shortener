@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"errors"
 	"sync"
 )
@@ -21,7 +22,7 @@ func NewStorage() *Storage {
 	}
 }
 
-func (s *Storage) Save(id string, originalURL string) error {
+func (s *Storage) Save(_ context.Context, id string, originalURL string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.urls[id]; ok {
@@ -31,7 +32,7 @@ func (s *Storage) Save(id string, originalURL string) error {
 	return nil
 }
 
-func (s *Storage) Load(id string) (originalURL string, err error) {
+func (s *Storage) Load(_ context.Context, id string) (originalURL string, err error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	originalURL, ok := s.urls[id]

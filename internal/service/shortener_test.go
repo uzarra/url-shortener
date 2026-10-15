@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"strings"
@@ -101,7 +102,7 @@ func TestShortener_Expand(t *testing.T) {
 				repo:    tt.fields.repo,
 				baseURL: tt.fields.baseURL,
 			}
-			got, err := s.Expand(tt.args.id)
+			got, err := s.Expand(context.Background(), tt.args.id)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Expand() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -147,7 +148,7 @@ func TestShortener_Shorten(t *testing.T) {
 				repo:    tt.fields.repo,
 				baseURL: tt.fields.baseURL,
 			}
-			got, err := s.Shorten(tt.args.url)
+			got, err := s.Shorten(context.Background(), tt.args.url)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Shorten() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -196,7 +197,7 @@ func newTestStorage(m map[string]string) *testStorage {
 	}
 }
 
-func (t *testStorage) Save(id string, originalURL string) error {
+func (t *testStorage) Save(ctx context.Context, id string, originalURL string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if _, ok := t.urls[id]; ok {
@@ -206,7 +207,7 @@ func (t *testStorage) Save(id string, originalURL string) error {
 	return nil
 }
 
-func (t *testStorage) Load(id string) (originalURL string, err error) {
+func (t *testStorage) Load(ctx context.Context, id string) (originalURL string, err error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	originalURL, ok := t.urls[id]
