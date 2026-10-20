@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+
+	"github.com/uzarra/url-shortener/internal/model"
 )
 
 const validRecords = `[
@@ -293,5 +295,149 @@ func TestFileStorage_ConcurrentSave(t *testing.T) {
 	wg.Wait()
 	if records := readRecords(t, path); len(records) != n {
 		t.Errorf("records = %d, want %d", len(records), n)
+	}
+}
+
+func TestFileStorage_SaveBatch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "storage.json")
+	s := newTestFileStorage(t, path)
+	if err := s.Save(t.Context(), "4rSPg8ap", "http://yandex.ru"); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	urls := []model.URL{
+		{ShortID: "edVPg3ks", OriginalURL: "http://ya.ru"},
+		{ShortID: "dG56Hqxm", OriginalURL: "http://practicum.yandex.ru"},
+	}
+	if err := s.SaveBatch(t.Context(), urls); err != nil {
+		t.Fatalf("SaveBatch() error = %v", err)
+	}
+
+	want := []record{
+		{UUID: "1", ShortURL: "4rSPg8ap", OriginalURL: "http://yandex.ru"},
+		{UUID: "2", ShortURL: "edVPg3ks", OriginalURL: "http://ya.ru"},
+		{UUID: "3", ShortURL: "dG56Hqxm", OriginalURL: "http://practicum.yandex.ru"},
+	}
+	got := readRecords(t, path)
+	if len(got) != len(want) {
+		t.Fatalf("records = %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("record[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+
+	restored := newTestFileStorage(t, path)
+	for _, r := range want {
+		if original, err := restored.Load(t.Context(), r.ShortURL); err != nil || original != r.OriginalURL {
+			t.Errorf("Load(%q) = %q, %v, want %q, nil", r.ShortURL, original, err, r.OriginalURL)
+		}
+	}
+}
+
+func TestFileStorage_SaveBatchToNewFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "storage.json")
+	s := newTestFileStorage(t, path)
+	if err := s.SaveBatch(t.Context(), []model.URL{
+		{ShortID: "4rSPg8ap", OriginalURL: "http://yandex.ru"},
+		{ShortID: "edVPg3ks", OriginalURL: "http://ya.ru"},
+	}); err != nil {
+		t.Fatalf("SaveBatch() error = %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	if string(data) != validRecords {
+		t.Errorf("file content =\n%s\nwant\n%s", data, validRecords)
+	}
+}
+
+func TestFileStorage_SaveBatchEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "storage.json")
+	s := newTestFileStorage(t, path)
+	if err := s.SaveBatch(t.Context(), nil); err != nil {
+		t.Fatalf("SaveBatch() error = %v", err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("stat file error = %v, want %v", err, os.ErrNotExist)
+	}
+}
+
+func TestFileStorage_SaveBatchDuplicate(t *testing.T) {
+	tests := []struct {
+		name string
+		urls []model.URL
+	}{
+		{name: "id already stored", urls: []model.URL{
+			{ShortID: "newID123", OriginalURL: "http://new.ru"},
+			{ShortID: "abc", OriginalURL: "http://ya.ru"},
+		}},
+		{name: "duplicate id inside batch", urls: []model.URL{
+			{ShortID: "newID123", OriginalURL: "http://new.ru"},
+			{ShortID: "newID123", OriginalURL: "http://ya.ru"},
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "storage.json")
+			s := newTestFileStorage(t, path)
+			if err := s.Save(t.Context(), "abc", "http://yandex.ru"); err != nil {
+				t.Fatalf("Save() error = %v", err)
+			}
+			if err := s.SaveBatch(t.Context(), tt.urls); !errors.Is(err, ErrAlreadyExists) {
+				t.Fatalf("SaveBatch() error = %v, want %v", err, ErrAlreadyExists)
+			}
+			if _, err := s.Load(t.Context(), "newID123"); !errors.Is(err, ErrNotFound) {
+				t.Errorf("Load() after failed SaveBatch error = %v, want %v", err, ErrNotFound)
+			}
+			if records := readRecords(t, path); len(records) != 1 {
+				t.Errorf("records in file = %d, want 1", len(records))
+			}
+		})
+	}
+}
+
+func TestFileStorage_SaveBatchWriteError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "storage.json")
+	s := newTestFileStorage(t, path)
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatalf("prepare dir: %v", err)
+	}
+	if err := s.SaveBatch(t.Context(), []model.URL{{ShortID: "abc", OriginalURL: "http://yandex.ru"}}); err == nil {
+		t.Fatal("SaveBatch() error = nil, want error")
+	}
+	if _, err := s.Load(t.Context(), "abc"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("Load() after failed SaveBatch error = %v, want %v", err, ErrNotFound)
+	}
+}
+
+func TestFileStorage_ConcurrentSaveBatch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "storage.json")
+	s := newTestFileStorage(t, path)
+	const n, batchSize = 20, 5
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			urls := make([]model.URL, batchSize)
+			for j := range urls {
+				urls[j] = model.URL{ShortID: fmt.Sprintf("id%d_%d", i, j), OriginalURL: "http://example.com"}
+			}
+			if err := s.SaveBatch(t.Context(), urls); err != nil {
+				t.Errorf("SaveBatch() error = %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	records := readRecords(t, path)
+	if len(records) != n*batchSize {
+		t.Fatalf("records = %d, want %d", len(records), n*batchSize)
+	}
+	for i, r := range records {
+		if r.UUID != strconv.Itoa(i+1) {
+			t.Errorf("record[%d] uuid = %q, want %q", i, r.UUID, strconv.Itoa(i+1))
+		}
 	}
 }

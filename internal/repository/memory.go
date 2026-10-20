@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"sync"
+
+	"github.com/uzarra/url-shortener/internal/model"
 )
 
 var (
@@ -40,4 +42,23 @@ func (s *Storage) Load(_ context.Context, id string) (originalURL string, err er
 		return "", ErrNotFound
 	}
 	return originalURL, nil
+}
+
+func (s *Storage) SaveBatch(_ context.Context, urls []model.URL) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	seen := make(map[string]struct{}, len(urls))
+	for _, u := range urls {
+		if _, ok := s.urls[u.ShortID]; ok {
+			return ErrAlreadyExists
+		}
+		if _, ok := seen[u.ShortID]; ok {
+			return ErrAlreadyExists
+		}
+		seen[u.ShortID] = struct{}{}
+	}
+	for _, u := range urls {
+		s.urls[u.ShortID] = u.OriginalURL
+	}
+	return nil
 }

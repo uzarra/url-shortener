@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/uzarra/url-shortener/internal/api"
+	"github.com/uzarra/url-shortener/internal/model"
 )
 
 const maxBodyBytes = 1 << 20
@@ -19,6 +20,7 @@ const maxBodyBytes = 1 << 20
 type Shortener interface {
 	Shorten(ctx context.Context, url string) (string, error)
 	Expand(ctx context.Context, id string) (string, error)
+	ShortenBatch(ctx context.Context, batchItems []model.BatchItem) ([]model.BatchResult, error)
 }
 
 type Pinger interface {
@@ -125,4 +127,59 @@ func (h *Handler) Ping(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+func (h *Handler) ShortenBatch(w http.ResponseWriter, r *http.Request) {
+	contentType := r.Header.Get("Content-Type")
+	if mediaType, _, err := mime.ParseMediaType(contentType); err != nil || mediaType != "application/json" {
+		http.Error(w, "incorrect content-type", http.StatusBadRequest)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	var request []api.ShortenBatchRequestItem
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+			http.Error(w, "request entity too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, "incorrect request body", http.StatusBadRequest)
+		return
+	}
+	if len(request) == 0 {
+		http.Error(w, "empty batch", http.StatusBadRequest)
+		return
+	}
+
+	batchItems := make([]model.BatchItem, len(request))
+	for i, requestItem := range request {
+		url := strings.TrimSpace(requestItem.OriginalURL)
+		if url == "" {
+			http.Error(w, "empty url", http.StatusBadRequest)
+			return
+		}
+		batchItems[i] = model.BatchItem{
+			CorrelationID: requestItem.CorrelationID,
+			OriginalURL:   url,
+		}
+	}
+	batchResults, err := h.svc.ShortenBatch(r.Context(), batchItems)
+	if err != nil {
+		http.Error(w, "failed to generate id", http.StatusInternalServerError)
+		return
+	}
+	results := make([]api.ShortenBatchResponseItem, len(batchResults))
+	for i, batchItem := range batchResults {
+		results[i] = api.ShortenBatchResponseItem{
+			CorrelationID: batchItem.CorrelationID,
+			ShortURL:      batchItem.ShortURL,
+		}
+	}
+	jsonData, err := json.Marshal(results)
+	if err != nil {
+		http.Error(w, "failed to marshal", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	w.Write(jsonData)
 }

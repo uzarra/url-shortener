@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/uzarra/url-shortener/internal/model"
 	"github.com/uzarra/url-shortener/internal/repository"
 )
 
@@ -160,6 +161,101 @@ func TestShortener_Shorten(t *testing.T) {
 	}
 }
 
+func TestShortener_ShortenBatch(t *testing.T) {
+	storage := newTestStorage(map[string]string{})
+	s := NewShortener(storage, "http://localhost:8080/")
+	items := []model.BatchItem{
+		{CorrelationID: "a1", OriginalURL: "http://yandex.ru"},
+		{CorrelationID: "b2", OriginalURL: "http://ya.ru"},
+	}
+	got, err := s.ShortenBatch(context.Background(), items)
+	if err != nil {
+		t.Fatalf("ShortenBatch() error = %v", err)
+	}
+	if len(got) != len(items) {
+		t.Fatalf("ShortenBatch() results = %d, want %d", len(got), len(items))
+	}
+	seen := make(map[string]struct{}, len(got))
+	for i, res := range got {
+		if res.CorrelationID != items[i].CorrelationID {
+			t.Errorf("result[%d] correlation_id = %q, want %q", i, res.CorrelationID, items[i].CorrelationID)
+		}
+		id, ok := strings.CutPrefix(res.ShortURL, "http://localhost:8080/")
+		if !ok || len(id) != idLength {
+			t.Errorf("result[%d] short_url = %q, want base URL + id of length %d", i, res.ShortURL, idLength)
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			t.Errorf("result[%d] id %q is duplicated", i, id)
+		}
+		seen[id] = struct{}{}
+		if original, err := storage.Load(context.Background(), id); err != nil || original != items[i].OriginalURL {
+			t.Errorf("Load(%q) = %q, %v, want %q, nil", id, original, err, items[i].OriginalURL)
+		}
+	}
+}
+
+func TestShortener_ShortenBatch_IncorrectInput(t *testing.T) {
+	tests := []struct {
+		name  string
+		items []model.BatchItem
+	}{
+		{name: "nil batch", items: nil},
+		{name: "empty batch", items: []model.BatchItem{}},
+		{name: "empty url", items: []model.BatchItem{
+			{CorrelationID: "a1", OriginalURL: "http://yandex.ru"},
+			{CorrelationID: "b2", OriginalURL: " "},
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			storage := newTestStorage(map[string]string{})
+			s := NewShortener(storage, "http://localhost:8080/")
+			if _, err := s.ShortenBatch(context.Background(), tt.items); !errors.Is(err, ErrIncorrectInput) {
+				t.Fatalf("ShortenBatch() error = %v, want %v", err, ErrIncorrectInput)
+			}
+			if len(storage.urls) != 0 {
+				t.Errorf("stored urls = %d, want 0", len(storage.urls))
+			}
+		})
+	}
+}
+
+func TestShortener_ShortenBatch_Retries(t *testing.T) {
+	errDB := errors.New("db is down")
+	tests := []struct {
+		name      string
+		batchErrs []error
+		wantErr   error
+		wantCalls int
+	}{
+		{name: "collision then success", batchErrs: []error{repository.ErrAlreadyExists}, wantCalls: 2},
+		{name: "collisions exhaust retries",
+			batchErrs: []error{repository.ErrAlreadyExists, repository.ErrAlreadyExists, repository.ErrAlreadyExists,
+				repository.ErrAlreadyExists, repository.ErrAlreadyExists},
+			wantErr: ErrIDGeneration, wantCalls: maxIDGenerateRetries},
+		{name: "storage error is not retried", batchErrs: []error{errDB}, wantErr: errDB, wantCalls: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			storage := &failingBatchStorage{testStorage: newTestStorage(map[string]string{}), errs: tt.batchErrs}
+			s := NewShortener(storage, "http://localhost:8080/")
+			got, err := s.ShortenBatch(context.Background(), []model.BatchItem{
+				{CorrelationID: "a1", OriginalURL: "http://yandex.ru"},
+			})
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("ShortenBatch() error = %v, want %v", err, tt.wantErr)
+			}
+			if tt.wantErr == nil && len(got) != 1 {
+				t.Errorf("ShortenBatch() results = %d, want 1", len(got))
+			}
+			if storage.calls != tt.wantCalls {
+				t.Errorf("SaveBatch() calls = %d, want %d", storage.calls, tt.wantCalls)
+			}
+		})
+	}
+}
+
 func Test_generateID(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -215,4 +311,37 @@ func (t *testStorage) Load(ctx context.Context, id string) (originalURL string, 
 		return "", errors.New("not found")
 	}
 	return originalURL, nil
+}
+
+func (t *testStorage) SaveBatch(ctx context.Context, urls []model.URL) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	seen := make(map[string]struct{}, len(urls))
+	for _, u := range urls {
+		if _, ok := t.urls[u.ShortID]; ok {
+			return repository.ErrAlreadyExists
+		}
+		if _, ok := seen[u.ShortID]; ok {
+			return repository.ErrAlreadyExists
+		}
+		seen[u.ShortID] = struct{}{}
+	}
+	for _, u := range urls {
+		t.urls[u.ShortID] = u.OriginalURL
+	}
+	return nil
+}
+
+type failingBatchStorage struct {
+	*testStorage
+	errs  []error
+	calls int
+}
+
+func (f *failingBatchStorage) SaveBatch(ctx context.Context, urls []model.URL) error {
+	f.calls++
+	if f.calls <= len(f.errs) {
+		return f.errs[f.calls-1]
+	}
+	return f.testStorage.SaveBatch(ctx, urls)
 }
