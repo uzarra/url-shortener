@@ -12,8 +12,11 @@ import (
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/uzarra/url-shortener/internal/model"
 	"github.com/uzarra/url-shortener/migrations"
 )
+
+const insertURLQuery = "INSERT INTO urls (short_url, original_url) VALUES ($1, $2)"
 
 type PostgresStorage struct {
 	db *sql.DB
@@ -30,12 +33,11 @@ func NewPostgresStorage(db *sql.DB) (*PostgresStorage, error) {
 }
 
 func (s *PostgresStorage) Save(ctx context.Context, id string, originalURL string) error {
-	var pgErr *pgconn.PgError
-	_, err := s.db.ExecContext(ctx, "INSERT INTO urls (short_url, original_url) VALUES ($1, $2)", id, originalURL)
-	if err != nil && errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
-		return ErrAlreadyExists
-	}
+	_, err := s.db.ExecContext(ctx, insertURLQuery, id, originalURL)
 	if err != nil {
+		if isUniqueViolation(err) {
+			return ErrAlreadyExists
+		}
 		return fmt.Errorf("insert url: %w", err)
 	}
 	return nil
@@ -51,6 +53,39 @@ func (s *PostgresStorage) Load(ctx context.Context, id string) (string, error) {
 		return "", fmt.Errorf("select url: %w", err)
 	}
 	return originalURL, nil
+}
+
+func (s *PostgresStorage) SaveBatch(ctx context.Context, urls []model.URL) error {
+	if len(urls) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+	stmt, err := tx.PrepareContext(ctx, insertURLQuery)
+	if err != nil {
+		return fmt.Errorf("prepare statement: %w", err)
+	}
+	defer stmt.Close()
+	for _, u := range urls {
+		if _, err := stmt.ExecContext(ctx, u.ShortID, u.OriginalURL); err != nil {
+			if isUniqueViolation(err) {
+				return ErrAlreadyExists
+			}
+			return fmt.Errorf("insert url: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit tx: %w", err)
+	}
+	return nil
+}
+
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation
 }
 
 func OpenPostgres(dsn string) (*sql.DB, error) {

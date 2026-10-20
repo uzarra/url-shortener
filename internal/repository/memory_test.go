@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+
+	"github.com/uzarra/url-shortener/internal/model"
 )
 
 func TestStorage_Load(t *testing.T) {
@@ -120,5 +122,87 @@ func TestStorage_ConcurrentSameID(t *testing.T) {
 	wg.Wait()
 	if success != 1 {
 		t.Errorf("successful saves = %d, want 1", success)
+	}
+}
+
+func TestStorage_SaveBatch(t *testing.T) {
+	s := NewStorage()
+	urls := []model.URL{
+		{ShortID: "4rSPg8ap", OriginalURL: "http://yandex.ru"},
+		{ShortID: "edVPg3ks", OriginalURL: "http://ya.ru"},
+	}
+	if err := s.SaveBatch(t.Context(), urls); err != nil {
+		t.Fatalf("SaveBatch() error = %v", err)
+	}
+	for _, u := range urls {
+		if got, err := s.Load(t.Context(), u.ShortID); err != nil || got != u.OriginalURL {
+			t.Errorf("Load(%q) = %q, %v, want %q, nil", u.ShortID, got, err, u.OriginalURL)
+		}
+	}
+}
+
+func TestStorage_SaveBatchDuplicate(t *testing.T) {
+	tests := []struct {
+		name string
+		urls []model.URL
+	}{
+		{name: "id already stored", urls: []model.URL{
+			{ShortID: "newID123", OriginalURL: "http://new.ru"},
+			{ShortID: "abc", OriginalURL: "http://ya.ru"},
+		}},
+		{name: "duplicate id inside batch", urls: []model.URL{
+			{ShortID: "newID123", OriginalURL: "http://new.ru"},
+			{ShortID: "newID123", OriginalURL: "http://ya.ru"},
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := NewStorage()
+			if err := s.Save(t.Context(), "abc", "http://yandex.ru"); err != nil {
+				t.Fatalf("Save() error = %v", err)
+			}
+			if err := s.SaveBatch(t.Context(), tt.urls); !errors.Is(err, ErrAlreadyExists) {
+				t.Fatalf("SaveBatch() error = %v, want %v", err, ErrAlreadyExists)
+			}
+			if _, err := s.Load(t.Context(), "newID123"); !errors.Is(err, ErrNotFound) {
+				t.Errorf("Load() after failed SaveBatch error = %v, want %v", err, ErrNotFound)
+			}
+			if got, _ := s.Load(t.Context(), "abc"); got != "http://yandex.ru" {
+				t.Errorf("Load() = %q, want original %q", got, "http://yandex.ru")
+			}
+		})
+	}
+}
+
+func TestStorage_SaveBatchConcurrentSameID(t *testing.T) {
+	s := NewStorage()
+	const n = 50
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		success int
+	)
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := s.SaveBatch(t.Context(), []model.URL{
+				{ShortID: fmt.Sprintf("unique%d", i), OriginalURL: "http://example.com"},
+				{ShortID: "same", OriginalURL: fmt.Sprintf("http://example.com/%d", i)},
+			})
+			if err == nil {
+				mu.Lock()
+				success++
+				mu.Unlock()
+				return
+			}
+			if !errors.Is(err, ErrAlreadyExists) {
+				t.Errorf("SaveBatch() error = %v, want nil or %v", err, ErrAlreadyExists)
+			}
+		}()
+	}
+	wg.Wait()
+	if success != 1 {
+		t.Errorf("successful batches = %d, want 1", success)
 	}
 }
