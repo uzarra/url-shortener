@@ -17,6 +17,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/uzarra/url-shortener/internal/model"
+	"github.com/uzarra/url-shortener/internal/service"
 )
 
 func TestHandler_Expand_BadId(t *testing.T) {
@@ -95,6 +96,29 @@ func TestHandler_Shorten(t *testing.T) {
 	assert.Equal(t, "text/plain", mediaType)
 }
 
+func TestHandler_Shorten_Conflict(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/",
+		bytes.NewReader([]byte(`http://test.ru`)))
+	request.Header.Set("Content-Type", "text/plain")
+	rec := httptest.NewRecorder()
+	handler := New(&conflictTestShortener{}, &testPinger{})
+	handler.Shorten(rec, request)
+	mediaType, _, _ := mime.ParseMediaType(rec.Header().Get("Content-Type"))
+	assert.Equal(t, http.StatusConflict, rec.Code)
+	assert.Equal(t, "http://localhost:8080/existing", rec.Body.String())
+	assert.Equal(t, "text/plain", mediaType)
+}
+
+func TestHandler_Shorten_ConflictLookupFails(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/",
+		bytes.NewReader([]byte(`http://test.ru`)))
+	request.Header.Set("Content-Type", "text/plain")
+	rec := httptest.NewRecorder()
+	handler := New(&conflictTestShortener{lookupErr: errors.New("bad")}, &testPinger{})
+	handler.Shorten(rec, request)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
 func TestHandler_ShortenInBody_BadContentType(t *testing.T) {
 	badContentTypeRequest := httptest.NewRequest(http.MethodPost, "/api/shorten",
 		bytes.NewReader([]byte(`{"url":"http://test.ru"}`)))
@@ -157,6 +181,29 @@ func TestHandler_ShortenInBody(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, rec.Code)
 	assert.JSONEq(t, `{"result":"http://localhost:8080/qwe123qw"}`, rec.Body.String())
 	assert.Equal(t, "application/json", mediaType)
+}
+
+func TestHandler_ShortenInBody_Conflict(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/api/shorten",
+		bytes.NewReader([]byte(`{"url":"http://test.ru"}`)))
+	request.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler := New(&conflictTestShortener{}, &testPinger{})
+	handler.ShortenInBody(rec, request)
+	mediaType, _, _ := mime.ParseMediaType(rec.Header().Get("Content-Type"))
+	assert.Equal(t, http.StatusConflict, rec.Code)
+	assert.JSONEq(t, `{"result":"http://localhost:8080/existing"}`, rec.Body.String())
+	assert.Equal(t, "application/json", mediaType)
+}
+
+func TestHandler_ShortenInBody_ConflictLookupFails(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/api/shorten",
+		bytes.NewReader([]byte(`{"url":"http://test.ru"}`)))
+	request.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler := New(&conflictTestShortener{lookupErr: errors.New("bad")}, &testPinger{})
+	handler.ShortenInBody(rec, request)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
 func TestHandler_ShortenBatch_BadRequest(t *testing.T) {
@@ -339,6 +386,10 @@ func (t *testShortener) ShortenBatch(_ context.Context, batchItems []model.Batch
 	return results, nil
 }
 
+func (t *testShortener) GetShortURLByOriginalURL(_ context.Context, _ string) (string, error) {
+	return "http://localhost:8080/qwe123qw", nil
+}
+
 type badTestShortener struct {
 }
 
@@ -356,6 +407,26 @@ func (t *badTestShortener) Expand(_ context.Context, _ string) (string, error) {
 
 func (t *badTestShortener) ShortenBatch(_ context.Context, _ []model.BatchItem) ([]model.BatchResult, error) {
 	return nil, errors.New("bad")
+}
+
+func (t *badTestShortener) GetShortURLByOriginalURL(_ context.Context, _ string) (string, error) {
+	return "", errors.New("bad")
+}
+
+type conflictTestShortener struct {
+	testShortener
+	lookupErr error
+}
+
+func (t *conflictTestShortener) Shorten(_ context.Context, _ string) (string, error) {
+	return "", service.ErrConflict
+}
+
+func (t *conflictTestShortener) GetShortURLByOriginalURL(_ context.Context, _ string) (string, error) {
+	if t.lookupErr != nil {
+		return "", t.lookupErr
+	}
+	return "http://localhost:8080/existing", nil
 }
 
 type testPinger struct {

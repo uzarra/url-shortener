@@ -161,6 +161,46 @@ func TestShortener_Shorten(t *testing.T) {
 	}
 }
 
+func TestShortener_Shorten_Conflict(t *testing.T) {
+	storage := newTestStorage(map[string]string{"abc": "https://google.com"})
+	s := NewShortener(storage, "http://localhost:8080/")
+	got, err := s.Shorten(context.Background(), "https://google.com")
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("Shorten() error = %v, want %v", err, ErrConflict)
+	}
+	if got != "" {
+		t.Errorf("Shorten() got = %q, want empty", got)
+	}
+	if len(storage.urls) != 1 {
+		t.Errorf("stored urls = %d, want 1", len(storage.urls))
+	}
+}
+
+func TestShortener_GetShortURLByOriginalURL(t *testing.T) {
+	tests := []struct {
+		name        string
+		originalURL string
+		want        string
+		wantErr     error
+	}{
+		{name: "success", originalURL: "https://google.com", want: "http://localhost:8080/abc"},
+		{name: "not found", originalURL: "https://ya.ru", wantErr: repository.ErrNotFound},
+		{name: "empty url", originalURL: "", wantErr: ErrIncorrectInput},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := NewShortener(newTestStorage(map[string]string{"abc": "https://google.com"}), "http://localhost:8080/")
+			got, err := s.GetShortURLByOriginalURL(context.Background(), tt.originalURL)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("GetShortURLByOriginalURL() error = %v, want %v", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Errorf("GetShortURLByOriginalURL() got = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestShortener_ShortenBatch(t *testing.T) {
 	storage := newTestStorage(map[string]string{})
 	s := NewShortener(storage, "http://localhost:8080/")
@@ -283,13 +323,29 @@ func Test_generateID(t *testing.T) {
 }
 
 type testStorage struct {
-	mu   sync.RWMutex
-	urls map[string]string
+	mu         sync.RWMutex
+	urls       map[string]string
+	byOriginal map[string]string
+}
+
+func (t *testStorage) GetShortURLByOriginalURL(ctx context.Context, originalURL string) (string, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	shortID, ok := t.byOriginal[originalURL]
+	if !ok {
+		return "", repository.ErrNotFound
+	}
+	return shortID, nil
 }
 
 func newTestStorage(m map[string]string) *testStorage {
+	byOriginal := make(map[string]string, len(m))
+	for id, originalURL := range m {
+		byOriginal[originalURL] = id
+	}
 	return &testStorage{
-		urls: m,
+		urls:       m,
+		byOriginal: byOriginal,
 	}
 }
 
@@ -299,7 +355,11 @@ func (t *testStorage) Save(ctx context.Context, id string, originalURL string) e
 	if _, ok := t.urls[id]; ok {
 		return repository.ErrAlreadyExists
 	}
+	if _, ok := t.byOriginal[originalURL]; ok {
+		return repository.ErrConflict
+	}
 	t.urls[id] = originalURL
+	t.byOriginal[originalURL] = id
 	return nil
 }
 
@@ -328,6 +388,7 @@ func (t *testStorage) SaveBatch(ctx context.Context, urls []model.URL) error {
 	}
 	for _, u := range urls {
 		t.urls[u.ShortID] = u.OriginalURL
+		t.byOriginal[u.OriginalURL] = u.ShortID
 	}
 	return nil
 }

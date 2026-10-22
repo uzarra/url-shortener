@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS urls_original_url_uniq;

@@ -16,7 +16,10 @@ import (
 	"github.com/uzarra/url-shortener/migrations"
 )
 
-const insertURLQuery = "INSERT INTO urls (short_url, original_url) VALUES ($1, $2)"
+const (
+	insertURLQuery         = "INSERT INTO urls (short_url, original_url) VALUES ($1, $2)"
+	originalURLUniqueIndex = "urls_original_url_uniq"
+)
 
 type PostgresStorage struct {
 	db *sql.DB
@@ -35,7 +38,11 @@ func NewPostgresStorage(db *sql.DB) (*PostgresStorage, error) {
 func (s *PostgresStorage) Save(ctx context.Context, id string, originalURL string) error {
 	_, err := s.db.ExecContext(ctx, insertURLQuery, id, originalURL)
 	if err != nil {
-		if isUniqueViolation(err) {
+		isUniqueViolationErr, constraintName := isUniqueViolation(err)
+		if isUniqueViolationErr {
+			if constraintName == originalURLUniqueIndex {
+				return ErrConflict
+			}
 			return ErrAlreadyExists
 		}
 		return fmt.Errorf("insert url: %w", err)
@@ -71,7 +78,11 @@ func (s *PostgresStorage) SaveBatch(ctx context.Context, urls []model.URL) error
 	defer stmt.Close()
 	for _, u := range urls {
 		if _, err := stmt.ExecContext(ctx, u.ShortID, u.OriginalURL); err != nil {
-			if isUniqueViolation(err) {
+			isUniqueViolationErr, constraintName := isUniqueViolation(err)
+			if isUniqueViolationErr {
+				if constraintName == originalURLUniqueIndex {
+					return ErrConflict
+				}
 				return ErrAlreadyExists
 			}
 			return fmt.Errorf("insert url: %w", err)
@@ -83,9 +94,24 @@ func (s *PostgresStorage) SaveBatch(ctx context.Context, urls []model.URL) error
 	return nil
 }
 
-func isUniqueViolation(err error) bool {
+func (s *PostgresStorage) GetShortURLByOriginalURL(ctx context.Context, originalURL string) (string, error) {
+	var shortURL string
+	err := s.db.QueryRowContext(ctx, "SELECT short_url FROM urls WHERE original_url = $1", originalURL).Scan(&shortURL)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("select url: %w", err)
+	}
+	return shortURL, nil
+}
+
+func isUniqueViolation(err error) (bool, string) {
 	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == pgerrcode.UniqueViolation, pgErr.ConstraintName
+	}
+	return false, ""
 }
 
 func OpenPostgres(dsn string) (*sql.DB, error) {
