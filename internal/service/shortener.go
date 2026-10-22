@@ -18,11 +18,13 @@ const (
 
 var ErrIncorrectInput = errors.New("input is incorrect")
 var ErrIDGeneration = errors.New("id generation failed")
+var ErrConflict = errors.New("url already shortened")
 
 type Repository interface {
 	Save(ctx context.Context, id string, url string) error
 	Load(ctx context.Context, id string) (string, error)
 	SaveBatch(ctx context.Context, urls []model.URL) error
+	GetShortURLByOriginalURL(ctx context.Context, originalURL string) (string, error)
 }
 
 type Shortener struct {
@@ -49,6 +51,9 @@ func (s *Shortener) Shorten(ctx context.Context, url string) (string, error) {
 		err = s.repo.Save(ctx, id, url)
 		if errors.Is(err, repository.ErrAlreadyExists) {
 			continue
+		}
+		if errors.Is(err, repository.ErrConflict) {
+			return "", ErrConflict
 		}
 		if err != nil {
 			return "", err
@@ -100,6 +105,17 @@ func (s *Shortener) ShortenBatch(ctx context.Context, batchItems []model.BatchIt
 		return batchResults, nil
 	}
 	return nil, ErrIDGeneration
+}
+
+func (s *Shortener) GetShortURLByOriginalURL(ctx context.Context, originalURL string) (string, error) {
+	if originalURL == "" {
+		return "", ErrIncorrectInput
+	}
+	shortURL, err := s.repo.GetShortURLByOriginalURL(ctx, originalURL)
+	if err != nil {
+		return "", err
+	}
+	return s.baseURL + "/" + shortURL, nil
 }
 
 func generateID() (string, error) {

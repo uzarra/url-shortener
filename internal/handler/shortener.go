@@ -13,14 +13,17 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/uzarra/url-shortener/internal/api"
 	"github.com/uzarra/url-shortener/internal/model"
+	"github.com/uzarra/url-shortener/internal/service"
 )
 
 const maxBodyBytes = 1 << 20
+const headerContentType = "Content-Type"
 
 type Shortener interface {
 	Shorten(ctx context.Context, url string) (string, error)
 	Expand(ctx context.Context, id string) (string, error)
 	ShortenBatch(ctx context.Context, batchItems []model.BatchItem) ([]model.BatchResult, error)
+	GetShortURLByOriginalURL(ctx context.Context, url string) (string, error)
 }
 
 type Pinger interface {
@@ -53,10 +56,21 @@ func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := h.svc.Shorten(r.Context(), original)
 	if err != nil {
+		if errors.Is(err, service.ErrConflict) {
+			id, err := h.svc.GetShortURLByOriginalURL(r.Context(), original)
+			if err != nil {
+				http.Error(w, "internal server error", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set(headerContentType, "text/plain")
+			w.WriteHeader(http.StatusConflict)
+			w.Write([]byte(id))
+			return
+		}
 		http.Error(w, "failed to generate id", http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set(headerContentType, "text/plain")
 	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(id))
 }
@@ -77,7 +91,7 @@ func (h *Handler) Expand(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ShortenInBody(w http.ResponseWriter, r *http.Request) {
-	contentType := r.Header.Get("Content-Type")
+	contentType := r.Header.Get(headerContentType)
 	if mediaType, _, err := mime.ParseMediaType(contentType); err != nil || mediaType != "application/json" {
 		http.Error(w, "incorrect content-type", http.StatusBadRequest)
 		return
@@ -99,6 +113,25 @@ func (h *Handler) ShortenInBody(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := h.svc.Shorten(r.Context(), url)
 	if err != nil {
+		if errors.Is(err, service.ErrConflict) {
+			id, err := h.svc.GetShortURLByOriginalURL(r.Context(), url)
+			if err != nil {
+				http.Error(w, "internal server error", http.StatusInternalServerError)
+				return
+			}
+			response := api.ShortenResponse{
+				Result: id,
+			}
+			jsonData, err := json.Marshal(response)
+			if err != nil {
+				http.Error(w, "failed to marshal", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set(headerContentType, "application/json")
+			w.WriteHeader(http.StatusConflict)
+			w.Write(jsonData)
+			return
+		}
 		http.Error(w, "failed to generate id", http.StatusInternalServerError)
 		return
 	}
@@ -110,7 +143,7 @@ func (h *Handler) ShortenInBody(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to marshal", http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(headerContentType, "application/json")
 	w.WriteHeader(http.StatusCreated)
 	w.Write(jsonData)
 }
@@ -130,7 +163,7 @@ func (h *Handler) Ping(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ShortenBatch(w http.ResponseWriter, r *http.Request) {
-	contentType := r.Header.Get("Content-Type")
+	contentType := r.Header.Get(headerContentType)
 	if mediaType, _, err := mime.ParseMediaType(contentType); err != nil || mediaType != "application/json" {
 		http.Error(w, "incorrect content-type", http.StatusBadRequest)
 		return
@@ -179,7 +212,7 @@ func (h *Handler) ShortenBatch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to marshal", http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(headerContentType, "application/json")
 	w.WriteHeader(http.StatusCreated)
 	w.Write(jsonData)
 }

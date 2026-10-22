@@ -50,6 +50,53 @@ func TestStorage_SaveDuplicate(t *testing.T) {
 	}
 }
 
+func TestStorage_SaveConflict(t *testing.T) {
+	s := NewStorage()
+	if err := s.Save(t.Context(), "abc", "http://yandex.ru"); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := s.Save(t.Context(), "def", "http://yandex.ru"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("Save() same original error = %v, want %v", err, ErrConflict)
+	}
+	if _, err := s.Load(t.Context(), "def"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("Load() after conflict error = %v, want %v", err, ErrNotFound)
+	}
+	if got, err := s.GetShortURLByOriginalURL(t.Context(), "http://yandex.ru"); err != nil || got != "abc" {
+		t.Errorf("GetShortURLByOriginalURL() = %q, %v, want %q, nil", got, err, "abc")
+	}
+}
+
+func TestStorage_GetShortURLByOriginalURL(t *testing.T) {
+	s := NewStorage()
+	if err := s.Save(t.Context(), "abc", "http://yandex.ru"); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := s.SaveBatch(t.Context(), []model.URL{{ShortID: "edVPg3ks", OriginalURL: "http://ya.ru"}}); err != nil {
+		t.Fatalf("SaveBatch() error = %v", err)
+	}
+	tests := []struct {
+		name        string
+		originalURL string
+		want        string
+		wantErr     error
+	}{
+		{name: "saved by Save", originalURL: "http://yandex.ru", want: "abc"},
+		{name: "saved by SaveBatch", originalURL: "http://ya.ru", want: "edVPg3ks"},
+		{name: "missing url", originalURL: "http://missing.ru", wantErr: ErrNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := s.GetShortURLByOriginalURL(t.Context(), tt.originalURL)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("GetShortURLByOriginalURL() error = %v, want %v", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Errorf("GetShortURLByOriginalURL() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestStorage_SaveKeepsSeparateIDs(t *testing.T) {
 	s := NewStorage()
 	urls := map[string]string{
@@ -77,7 +124,7 @@ func TestStorage_Concurrent(t *testing.T) {
 		id := fmt.Sprintf("id%d", i)
 		go func() {
 			defer wg.Done()
-			if err := s.Save(t.Context(), id, "http://example.com"); err != nil {
+			if err := s.Save(t.Context(), id, "http://example"+id+".com"); err != nil {
 				t.Errorf("Save(%q) error = %v", id, err)
 			}
 		}()
@@ -174,6 +221,40 @@ func TestStorage_SaveBatchDuplicate(t *testing.T) {
 	}
 }
 
+func TestStorage_SaveBatchConflict(t *testing.T) {
+	s := NewStorage()
+	if err := s.Save(t.Context(), "abc", "http://yandex.ru"); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	err := s.SaveBatch(t.Context(), []model.URL{
+		{ShortID: "newID123", OriginalURL: "http://new.ru"},
+		{ShortID: "def", OriginalURL: "http://yandex.ru"},
+	})
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("SaveBatch() error = %v, want %v", err, ErrConflict)
+	}
+	if _, err := s.Load(t.Context(), "newID123"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("Load() after failed SaveBatch error = %v, want %v", err, ErrNotFound)
+	}
+	if got, _ := s.GetShortURLByOriginalURL(t.Context(), "http://yandex.ru"); got != "abc" {
+		t.Errorf("GetShortURLByOriginalURL() = %q, want %q", got, "abc")
+	}
+}
+
+func TestStorage_SaveBatchConflictInsideBatch(t *testing.T) {
+	s := NewStorage()
+	err := s.SaveBatch(t.Context(), []model.URL{
+		{ShortID: "abc", OriginalURL: "http://yandex.ru"},
+		{ShortID: "def", OriginalURL: "http://yandex.ru"},
+	})
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("SaveBatch() error = %v, want %v", err, ErrConflict)
+	}
+	if _, err := s.Load(t.Context(), "abc"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("Load() after failed SaveBatch error = %v, want %v", err, ErrNotFound)
+	}
+}
+
 func TestStorage_SaveBatchConcurrentSameID(t *testing.T) {
 	s := NewStorage()
 	const n = 50
@@ -187,7 +268,7 @@ func TestStorage_SaveBatchConcurrentSameID(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			err := s.SaveBatch(t.Context(), []model.URL{
-				{ShortID: fmt.Sprintf("unique%d", i), OriginalURL: "http://example.com"},
+				{ShortID: fmt.Sprintf("unique%d", i), OriginalURL: fmt.Sprintf("http://test%d.com", i)},
 				{ShortID: "same", OriginalURL: fmt.Sprintf("http://example.com/%d", i)},
 			})
 			if err == nil {

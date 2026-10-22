@@ -89,6 +89,9 @@ func (s *FileStorage) Save(ctx context.Context, id string, originalURL string) e
 	if _, err := s.mem.Load(ctx, id); err == nil {
 		return ErrAlreadyExists
 	}
+	if _, err := s.mem.GetShortURLByOriginalURL(ctx, originalURL); err == nil {
+		return ErrConflict
+	}
 	rec := record{
 		UUID:        strconv.Itoa(s.count + 1),
 		ShortURL:    id,
@@ -112,15 +115,23 @@ func (s *FileStorage) SaveBatch(ctx context.Context, urls []model.URL) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	seen := make(map[string]struct{}, len(urls))
+	seenOriginal := make(map[string]struct{}, len(urls))
 	recs := make([]record, 0, len(urls))
 	for i, u := range urls {
 		if _, err := s.mem.Load(ctx, u.ShortID); err == nil {
 			return ErrAlreadyExists
 		}
+		if _, err := s.mem.GetShortURLByOriginalURL(ctx, u.OriginalURL); err == nil {
+			return ErrConflict
+		}
 		if _, ok := seen[u.ShortID]; ok {
 			return ErrAlreadyExists
 		}
+		if _, ok := seenOriginal[u.OriginalURL]; ok {
+			return ErrConflict
+		}
 		seen[u.ShortID] = struct{}{}
+		seenOriginal[u.OriginalURL] = struct{}{}
 		recs = append(recs, record{
 			UUID:        strconv.Itoa(s.count + i + 1),
 			ShortURL:    u.ShortID,
@@ -132,6 +143,10 @@ func (s *FileStorage) SaveBatch(ctx context.Context, urls []model.URL) error {
 	}
 	s.count += len(recs)
 	return s.mem.SaveBatch(ctx, urls)
+}
+
+func (s *FileStorage) GetShortURLByOriginalURL(ctx context.Context, originalURL string) (string, error) {
+	return s.mem.GetShortURLByOriginalURL(ctx, originalURL)
 }
 
 func (s *FileStorage) appendRecords(recs []record) error {

@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX urls_original_url_uniq ON urls (original_url);
