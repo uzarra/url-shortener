@@ -18,6 +18,7 @@ import (
 
 const (
 	insertURLQuery         = "INSERT INTO urls (short_url, original_url) VALUES ($1, $2)"
+	insertURLsBatchQuery   = "INSERT INTO urls (short_url, original_url) SELECT * FROM unnest($1::text[], $2::text[])"
 	originalURLUniqueIndex = "urls_original_url_uniq"
 )
 
@@ -38,14 +39,7 @@ func NewPostgresStorage(db *sql.DB) (*PostgresStorage, error) {
 func (s *PostgresStorage) Save(ctx context.Context, id string, originalURL string) error {
 	_, err := s.db.ExecContext(ctx, insertURLQuery, id, originalURL)
 	if err != nil {
-		isUniqueViolationErr, constraintName := isUniqueViolation(err)
-		if isUniqueViolationErr {
-			if constraintName == originalURLUniqueIndex {
-				return ErrConflict
-			}
-			return ErrAlreadyExists
-		}
-		return fmt.Errorf("insert url: %w", err)
+		return mapInsertError(err)
 	}
 	return nil
 }
@@ -66,30 +60,14 @@ func (s *PostgresStorage) SaveBatch(ctx context.Context, urls []model.URL) error
 	if len(urls) == 0 {
 		return nil
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
+	ids := make([]string, len(urls))
+	originals := make([]string, len(urls))
+	for i, u := range urls {
+		ids[i] = u.ShortID
+		originals[i] = u.OriginalURL
 	}
-	defer tx.Rollback()
-	stmt, err := tx.PrepareContext(ctx, insertURLQuery)
-	if err != nil {
-		return fmt.Errorf("prepare statement: %w", err)
-	}
-	defer stmt.Close()
-	for _, u := range urls {
-		if _, err := stmt.ExecContext(ctx, u.ShortID, u.OriginalURL); err != nil {
-			isUniqueViolationErr, constraintName := isUniqueViolation(err)
-			if isUniqueViolationErr {
-				if constraintName == originalURLUniqueIndex {
-					return ErrConflict
-				}
-				return ErrAlreadyExists
-			}
-			return fmt.Errorf("insert url: %w", err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit tx: %w", err)
+	if _, err := s.db.ExecContext(ctx, insertURLsBatchQuery, ids, originals); err != nil {
+		return mapInsertError(err)
 	}
 	return nil
 }
@@ -104,14 +82,6 @@ func (s *PostgresStorage) GetShortURLByOriginalURL(ctx context.Context, original
 		return "", fmt.Errorf("select url: %w", err)
 	}
 	return shortURL, nil
-}
-
-func isUniqueViolation(err error) (bool, string) {
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		return pgErr.Code == pgerrcode.UniqueViolation, pgErr.ConstraintName
-	}
-	return false, ""
 }
 
 func OpenPostgres(dsn string) (*sql.DB, error) {
@@ -140,4 +110,15 @@ func migrateUp(db *sql.DB) error {
 		return fmt.Errorf("apply migrations: %w", err)
 	}
 	return nil
+}
+
+func mapInsertError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
+		if pgErr.ConstraintName == originalURLUniqueIndex {
+			return ErrConflict
+		}
+		return ErrAlreadyExists
+	}
+	return fmt.Errorf("insert url: %w", err)
 }

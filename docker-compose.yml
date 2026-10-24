@@ -5,6 +5,8 @@ services:
       POSTGRES_USER: shortener
       POSTGRES_PASSWORD: shortener
       POSTGRES_DB: shortener
+    volumes:
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U shortener -d shortener"]
       interval: 2s
@@ -25,3 +27,6 @@ services:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/ping"]
       interval: 2s
       retries: 15
+
+volumes:
+  pgdata:

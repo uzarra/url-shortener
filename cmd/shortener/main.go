@@ -41,8 +41,8 @@ func main() {
 }
 
 func newRepository(cfg *config.Config, log zerolog.Logger) (service.Repository, *sql.DB, error) {
-	if cfg.DatabaseDsn != "" {
-		db, err := repository.OpenPostgres(cfg.DatabaseDsn)
+	if cfg.DatabaseDSN != "" {
+		db, err := repository.OpenPostgres(cfg.DatabaseDSN)
 		if err != nil {
 			return nil, nil, err
 		}

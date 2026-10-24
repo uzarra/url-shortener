@@ -10,7 +10,7 @@ import (
 const (
 	defaultAddr            = ":8080"
 	defaultBase            = "http://localhost:8080/"
-	defaultFileStoragePath = "file_storage.json"
+	defaultFileStoragePath = ""
 )
 
 func resetCLI(t *testing.T, args ...string) {
@@ -181,8 +181,8 @@ func TestLoad(t *testing.T) {
 			if cfg.FileStoragePath != tt.wantFile {
 				t.Errorf("FileStoragePath = %q, want %q", cfg.FileStoragePath, tt.wantFile)
 			}
-			if cfg.DatabaseDsn != tt.wantDSN {
-				t.Errorf("DatabaseDsn = %q, want %q", cfg.DatabaseDsn, tt.wantDSN)
+			if cfg.DatabaseDSN != tt.wantDSN {
+				t.Errorf("DatabaseDSN = %q, want %q", cfg.DatabaseDSN, tt.wantDSN)
 			}
 		})
 	}
