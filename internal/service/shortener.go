@@ -53,7 +53,11 @@ func (s *Shortener) Shorten(ctx context.Context, url string) (string, error) {
 			continue
 		}
 		if errors.Is(err, repository.ErrConflict) {
-			return "", ErrConflict
+			existing, err := s.GetShortURLByOriginalURL(ctx, url)
+			if err != nil {
+				return "", err
+			}
+			return existing, ErrConflict
 		}
 		if err != nil {
 			return "", err
@@ -74,37 +78,51 @@ func (s *Shortener) Expand(ctx context.Context, id string) (string, error) {
 	return originalURL, nil
 }
 
-func (s *Shortener) ShortenBatch(ctx context.Context, batchItems []model.BatchItem) ([]model.BatchResult, error) {
+func (s *Shortener) ShortenBatch(ctx context.Context, batchItems []model.BatchItem) ([]model.BatchResult, bool, error) {
 	if !isValid(batchItems) {
-		return nil, ErrIncorrectInput
+		return nil, false, ErrIncorrectInput
 	}
 	for range maxIDGenerateRetries {
-		urls := make([]model.URL, len(batchItems))
-		batchResults := make([]model.BatchResult, len(batchItems))
-		for i, u := range batchItems {
-			id, err := generateID()
-			if err != nil {
-				return nil, err
-			}
-			urls[i] = model.URL{
-				OriginalURL: u.OriginalURL,
-				ShortID:     id,
-			}
-			batchResults[i] = model.BatchResult{
-				CorrelationID: u.CorrelationID,
-				ShortURL:      s.baseURL + "/" + id,
-			}
-		}
-		err := s.repo.SaveBatch(ctx, urls)
-		if err != nil {
-			if errors.Is(err, repository.ErrAlreadyExists) {
+		ids := make(map[string]string, len(batchItems))
+		var conflict bool
+		var urls []model.URL
+		for _, item := range batchItems {
+			if _, ok := ids[item.OriginalURL]; ok {
 				continue
 			}
-			return nil, err
+			existing, err := s.repo.GetShortURLByOriginalURL(ctx, item.OriginalURL)
+			if err == nil {
+				ids[item.OriginalURL] = existing
+				conflict = true
+				continue
+			}
+			if !errors.Is(err, repository.ErrNotFound) {
+				return nil, false, err
+			}
+			id, err := generateID()
+			if err != nil {
+				return nil, false, err
+			}
+			ids[item.OriginalURL] = id
+			urls = append(urls, model.URL{ShortID: id, OriginalURL: item.OriginalURL})
 		}
-		return batchResults, nil
+		err := s.repo.SaveBatch(ctx, urls)
+		if errors.Is(err, repository.ErrAlreadyExists) || errors.Is(err, repository.ErrConflict) {
+			continue
+		}
+		if err != nil {
+			return nil, false, err
+		}
+		results := make([]model.BatchResult, len(batchItems))
+		for i, item := range batchItems {
+			results[i] = model.BatchResult{
+				CorrelationID: item.CorrelationID,
+				ShortURL:      s.baseURL + "/" + ids[item.OriginalURL],
+			}
+		}
+		return results, conflict, nil
 	}
-	return nil, ErrIDGeneration
+	return nil, false, ErrIDGeneration
 }
 
 func (s *Shortener) GetShortURLByOriginalURL(ctx context.Context, originalURL string) (string, error) {

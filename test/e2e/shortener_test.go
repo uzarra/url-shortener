@@ -143,13 +143,134 @@ func TestShortenJSONAndExpand(t *testing.T) {
 
 func TestShortenSameURLTwice(t *testing.T) {
 	original := uniqueURL(t)
-	for i := range 2 {
-		resp, body := do(t, http.MethodPost, "/", "text/plain", []byte(original))
-		if resp.StatusCode != http.StatusCreated {
-			t.Fatalf("POST / #%d status = %d, want %d, body %q", i+1, resp.StatusCode, http.StatusCreated, body)
-		}
-		assertRedirect(t, shortPath(t, body), original)
+	resp, first := do(t, http.MethodPost, "/", "text/plain", []byte(original))
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST / #1 status = %d, want %d, body %q", resp.StatusCode, http.StatusCreated, first)
 	}
+	resp, second := do(t, http.MethodPost, "/", "text/plain", []byte(original))
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("POST / #2 status = %d, want %d, body %q", resp.StatusCode, http.StatusConflict, second)
+	}
+	if second != first {
+		t.Errorf("POST / #2 short url = %q, want %q", second, first)
+	}
+	assertRedirect(t, shortPath(t, second), original)
+}
+
+func TestShortenJSONSameURLTwice(t *testing.T) {
+	original := uniqueURL(t)
+	first := shortenJSON(t, original, http.StatusCreated)
+	second := shortenJSON(t, original, http.StatusConflict)
+	if second != first {
+		t.Errorf("POST /api/shorten #2 short url = %q, want %q", second, first)
+	}
+	assertRedirect(t, shortPath(t, second), original)
+}
+
+func TestShortenBatchAndExpand(t *testing.T) {
+	base := uniqueURL(t)
+	items := []api.ShortenBatchRequestItem{
+		{CorrelationID: "a1", OriginalURL: base + "/a"},
+		{CorrelationID: "b2", OriginalURL: base + "/b"},
+	}
+	res := shortenBatch(t, items, http.StatusCreated)
+	if res[0].ShortURL == res[1].ShortURL {
+		t.Errorf("different urls got the same short url %q", res[0].ShortURL)
+	}
+	for i, item := range items {
+		assertRedirect(t, shortPath(t, res[i].ShortURL), item.OriginalURL)
+	}
+}
+
+func TestShortenBatchConflict(t *testing.T) {
+	base := uniqueURL(t)
+	existingURL := base + "/existing"
+	resp, existing := do(t, http.MethodPost, "/", "text/plain", []byte(existingURL))
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST / status = %d, want %d, body %q", resp.StatusCode, http.StatusCreated, existing)
+	}
+
+	t.Run("some urls already shortened", func(t *testing.T) {
+		items := []api.ShortenBatchRequestItem{
+			{CorrelationID: "a1", OriginalURL: existingURL},
+			{CorrelationID: "b2", OriginalURL: base + "/new"},
+		}
+		res := shortenBatch(t, items, http.StatusConflict)
+		if res[0].ShortURL != existing {
+			t.Errorf("existing url short_url = %q, want %q", res[0].ShortURL, existing)
+		}
+		for i, item := range items {
+			assertRedirect(t, shortPath(t, res[i].ShortURL), item.OriginalURL)
+		}
+	})
+
+	t.Run("all urls already shortened", func(t *testing.T) {
+		items := []api.ShortenBatchRequestItem{
+			{CorrelationID: "a1", OriginalURL: existingURL},
+		}
+		res := shortenBatch(t, items, http.StatusConflict)
+		if res[0].ShortURL != existing {
+			t.Errorf("existing url short_url = %q, want %q", res[0].ShortURL, existing)
+		}
+	})
+}
+
+func TestShortenBatchSameURLTwice(t *testing.T) {
+	original := uniqueURL(t)
+	items := []api.ShortenBatchRequestItem{
+		{CorrelationID: "a1", OriginalURL: original},
+		{CorrelationID: "b2", OriginalURL: original},
+	}
+	res := shortenBatch(t, items, http.StatusCreated)
+	if res[0].ShortURL != res[1].ShortURL {
+		t.Errorf("same url got different short urls %q and %q", res[0].ShortURL, res[1].ShortURL)
+	}
+	assertRedirect(t, shortPath(t, res[0].ShortURL), original)
+}
+
+func shortenJSON(t *testing.T, original string, wantStatus int) string {
+	t.Helper()
+	reqBody, err := json.Marshal(api.ShortenRequest{URL: original})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	resp, body := do(t, http.MethodPost, "/api/shorten", "application/json", reqBody)
+	if resp.StatusCode != wantStatus {
+		t.Fatalf("POST /api/shorten status = %d, want %d, body %q", resp.StatusCode, wantStatus, body)
+	}
+	var res api.ShortenResponse
+	if err := json.Unmarshal([]byte(body), &res); err != nil {
+		t.Fatalf("unmarshal response %q: %v", body, err)
+	}
+	return res.Result
+}
+
+func shortenBatch(t *testing.T, items []api.ShortenBatchRequestItem, wantStatus int) []api.ShortenBatchResponseItem {
+	t.Helper()
+	reqBody, err := json.Marshal(items)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	resp, body := do(t, http.MethodPost, "/api/shorten/batch", "application/json", reqBody)
+	if resp.StatusCode != wantStatus {
+		t.Fatalf("POST /api/shorten/batch status = %d, want %d, body %q", resp.StatusCode, wantStatus, body)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	var res []api.ShortenBatchResponseItem
+	if err := json.Unmarshal([]byte(body), &res); err != nil {
+		t.Fatalf("unmarshal response %q: %v", body, err)
+	}
+	if len(res) != len(items) {
+		t.Fatalf("results = %d, want %d", len(res), len(items))
+	}
+	for i, item := range items {
+		if res[i].CorrelationID != item.CorrelationID {
+			t.Errorf("result[%d] correlation_id = %q, want %q", i, res[i].CorrelationID, item.CorrelationID)
+		}
+	}
+	return res
 }
 
 func TestExpandUnknownID(t *testing.T) {
@@ -170,6 +291,12 @@ func TestBadRequests(t *testing.T) {
 		{name: "json wrong content type", path: "/api/shorten", contentType: "text/plain", body: `{"url":"https://ya.ru"}`},
 		{name: "json invalid body", path: "/api/shorten", contentType: "application/json", body: `{"url":`},
 		{name: "json empty url", path: "/api/shorten", contentType: "application/json", body: `{"url":""}`},
+		{name: "batch wrong content type", path: "/api/shorten/batch", contentType: "text/plain",
+			body: `[{"correlation_id":"1","original_url":"https://ya.ru"}]`},
+		{name: "batch invalid body", path: "/api/shorten/batch", contentType: "application/json", body: `[{"correlation_id":`},
+		{name: "batch empty", path: "/api/shorten/batch", contentType: "application/json", body: `[]`},
+		{name: "batch empty url", path: "/api/shorten/batch", contentType: "application/json",
+			body: `[{"correlation_id":"1","original_url":""}]`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

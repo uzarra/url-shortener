@@ -109,16 +109,6 @@ func TestHandler_Shorten_Conflict(t *testing.T) {
 	assert.Equal(t, "text/plain", mediaType)
 }
 
-func TestHandler_Shorten_ConflictLookupFails(t *testing.T) {
-	request := httptest.NewRequest(http.MethodPost, "/",
-		bytes.NewReader([]byte(`http://test.ru`)))
-	request.Header.Set("Content-Type", "text/plain")
-	rec := httptest.NewRecorder()
-	handler := New(&conflictTestShortener{lookupErr: errors.New("bad")}, &testPinger{})
-	handler.Shorten(rec, request)
-	assert.Equal(t, http.StatusInternalServerError, rec.Code)
-}
-
 func TestHandler_ShortenInBody_BadContentType(t *testing.T) {
 	badContentTypeRequest := httptest.NewRequest(http.MethodPost, "/api/shorten",
 		bytes.NewReader([]byte(`{"url":"http://test.ru"}`)))
@@ -196,16 +186,6 @@ func TestHandler_ShortenInBody_Conflict(t *testing.T) {
 	assert.Equal(t, "application/json", mediaType)
 }
 
-func TestHandler_ShortenInBody_ConflictLookupFails(t *testing.T) {
-	request := httptest.NewRequest(http.MethodPost, "/api/shorten",
-		bytes.NewReader([]byte(`{"url":"http://test.ru"}`)))
-	request.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	handler := New(&conflictTestShortener{lookupErr: errors.New("bad")}, &testPinger{})
-	handler.ShortenInBody(rec, request)
-	assert.Equal(t, http.StatusInternalServerError, rec.Code)
-}
-
 func TestHandler_ShortenBatch_BadRequest(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -262,6 +242,25 @@ func TestHandler_ShortenBatch(t *testing.T) {
 	handler.ShortenBatch(rec, request)
 	mediaType, _, _ := mime.ParseMediaType(rec.Header().Get("Content-Type"))
 	assert.Equal(t, http.StatusCreated, rec.Code)
+	assert.Equal(t, "application/json", mediaType)
+	assert.JSONEq(t, `[
+		{"correlation_id":"a1","short_url":"http://localhost:8080/a1"},
+		{"correlation_id":"b2","short_url":"http://localhost:8080/b2"}
+	]`, rec.Body.String())
+}
+
+func TestHandler_ShortenBatch_Conflict(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/api/shorten/batch",
+		bytes.NewReader([]byte(`[
+			{"correlation_id":"a1","original_url":"http://test.ru"},
+			{"correlation_id":"b2","original_url":"http://ya.ru"}
+		]`)))
+	request.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler := New(&conflictTestShortener{}, &testPinger{})
+	handler.ShortenBatch(rec, request)
+	mediaType, _, _ := mime.ParseMediaType(rec.Header().Get("Content-Type"))
+	assert.Equal(t, http.StatusConflict, rec.Code)
 	assert.Equal(t, "application/json", mediaType)
 	assert.JSONEq(t, `[
 		{"correlation_id":"a1","short_url":"http://localhost:8080/a1"},
@@ -375,7 +374,7 @@ func (t *testShortener) Expand(_ context.Context, id string) (string, error) {
 	return "https://yandex.ru", nil
 }
 
-func (t *testShortener) ShortenBatch(_ context.Context, batchItems []model.BatchItem) ([]model.BatchResult, error) {
+func (t *testShortener) ShortenBatch(_ context.Context, batchItems []model.BatchItem) ([]model.BatchResult, bool, error) {
 	results := make([]model.BatchResult, len(batchItems))
 	for i, item := range batchItems {
 		results[i] = model.BatchResult{
@@ -383,11 +382,7 @@ func (t *testShortener) ShortenBatch(_ context.Context, batchItems []model.Batch
 			ShortURL:      "http://localhost:8080/" + item.CorrelationID,
 		}
 	}
-	return results, nil
-}
-
-func (t *testShortener) GetShortURLByOriginalURL(_ context.Context, _ string) (string, error) {
-	return "http://localhost:8080/qwe123qw", nil
+	return results, false, nil
 }
 
 type badTestShortener struct {
@@ -405,28 +400,21 @@ func (t *badTestShortener) Expand(_ context.Context, _ string) (string, error) {
 	return "", errors.New("bad")
 }
 
-func (t *badTestShortener) ShortenBatch(_ context.Context, _ []model.BatchItem) ([]model.BatchResult, error) {
-	return nil, errors.New("bad")
-}
-
-func (t *badTestShortener) GetShortURLByOriginalURL(_ context.Context, _ string) (string, error) {
-	return "", errors.New("bad")
+func (t *badTestShortener) ShortenBatch(_ context.Context, _ []model.BatchItem) ([]model.BatchResult, bool, error) {
+	return nil, false, errors.New("bad")
 }
 
 type conflictTestShortener struct {
 	testShortener
-	lookupErr error
 }
 
 func (t *conflictTestShortener) Shorten(_ context.Context, _ string) (string, error) {
-	return "", service.ErrConflict
+	return "http://localhost:8080/existing", service.ErrConflict
 }
 
-func (t *conflictTestShortener) GetShortURLByOriginalURL(_ context.Context, _ string) (string, error) {
-	if t.lookupErr != nil {
-		return "", t.lookupErr
-	}
-	return "http://localhost:8080/existing", nil
+func (t *conflictTestShortener) ShortenBatch(ctx context.Context, batchItems []model.BatchItem) ([]model.BatchResult, bool, error) {
+	results, _, err := t.testShortener.ShortenBatch(ctx, batchItems)
+	return results, true, err
 }
 
 type testPinger struct {

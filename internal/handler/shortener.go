@@ -22,8 +22,7 @@ const headerContentType = "Content-Type"
 type Shortener interface {
 	Shorten(ctx context.Context, url string) (string, error)
 	Expand(ctx context.Context, id string) (string, error)
-	ShortenBatch(ctx context.Context, batchItems []model.BatchItem) ([]model.BatchResult, error)
-	GetShortURLByOriginalURL(ctx context.Context, url string) (string, error)
+	ShortenBatch(ctx context.Context, batchItems []model.BatchItem) ([]model.BatchResult, bool, error)
 }
 
 type Pinger interface {
@@ -54,25 +53,18 @@ func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "empty request body", http.StatusBadRequest)
 		return
 	}
-	id, err := h.svc.Shorten(r.Context(), original)
-	if err != nil {
-		if errors.Is(err, service.ErrConflict) {
-			id, err := h.svc.GetShortURLByOriginalURL(r.Context(), original)
-			if err != nil {
-				http.Error(w, "internal server error", http.StatusInternalServerError)
-				return
-			}
-			w.Header().Set(headerContentType, "text/plain")
-			w.WriteHeader(http.StatusConflict)
-			w.Write([]byte(id))
-			return
-		}
+	shortURL, err := h.svc.Shorten(r.Context(), original)
+	status := http.StatusCreated
+	switch {
+	case errors.Is(err, service.ErrConflict):
+		status = http.StatusConflict
+	case err != nil:
 		http.Error(w, "failed to generate id", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set(headerContentType, "text/plain")
-	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(id))
+	w.WriteHeader(status)
+	w.Write([]byte(shortURL))
 }
 
 func (h *Handler) Expand(w http.ResponseWriter, r *http.Request) {
@@ -111,32 +103,17 @@ func (h *Handler) ShortenInBody(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "empty url", http.StatusBadRequest)
 		return
 	}
-	id, err := h.svc.Shorten(r.Context(), url)
-	if err != nil {
-		if errors.Is(err, service.ErrConflict) {
-			id, err := h.svc.GetShortURLByOriginalURL(r.Context(), url)
-			if err != nil {
-				http.Error(w, "internal server error", http.StatusInternalServerError)
-				return
-			}
-			response := api.ShortenResponse{
-				Result: id,
-			}
-			jsonData, err := json.Marshal(response)
-			if err != nil {
-				http.Error(w, "failed to marshal", http.StatusInternalServerError)
-				return
-			}
-			w.Header().Set(headerContentType, "application/json")
-			w.WriteHeader(http.StatusConflict)
-			w.Write(jsonData)
-			return
-		}
+	shortURL, err := h.svc.Shorten(r.Context(), url)
+	status := http.StatusCreated
+	switch {
+	case errors.Is(err, service.ErrConflict):
+		status = http.StatusConflict
+	case err != nil:
 		http.Error(w, "failed to generate id", http.StatusInternalServerError)
 		return
 	}
 	response := api.ShortenResponse{
-		Result: id,
+		Result: shortURL,
 	}
 	jsonData, err := json.Marshal(response)
 	if err != nil {
@@ -144,7 +121,7 @@ func (h *Handler) ShortenInBody(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set(headerContentType, "application/json")
-	w.WriteHeader(http.StatusCreated)
+	w.WriteHeader(status)
 	w.Write(jsonData)
 }
 
@@ -195,7 +172,7 @@ func (h *Handler) ShortenBatch(w http.ResponseWriter, r *http.Request) {
 			OriginalURL:   url,
 		}
 	}
-	batchResults, err := h.svc.ShortenBatch(r.Context(), batchItems)
+	batchResults, conflict, err := h.svc.ShortenBatch(r.Context(), batchItems)
 	if err != nil {
 		http.Error(w, "failed to generate id", http.StatusInternalServerError)
 		return
@@ -212,7 +189,11 @@ func (h *Handler) ShortenBatch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to marshal", http.StatusInternalServerError)
 		return
 	}
+	status := http.StatusCreated
+	if conflict {
+		status = http.StatusConflict
+	}
 	w.Header().Set(headerContentType, "application/json")
-	w.WriteHeader(http.StatusCreated)
+	w.WriteHeader(status)
 	w.Write(jsonData)
 }
