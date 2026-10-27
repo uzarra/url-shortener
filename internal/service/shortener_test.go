@@ -1,12 +1,14 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/uzarra/url-shortener/internal/model"
 	"github.com/uzarra/url-shortener/internal/repository"
 )
 
@@ -101,7 +103,7 @@ func TestShortener_Expand(t *testing.T) {
 				repo:    tt.fields.repo,
 				baseURL: tt.fields.baseURL,
 			}
-			got, err := s.Expand(tt.args.id)
+			got, err := s.Expand(context.Background(), tt.args.id)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Expand() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -147,13 +149,264 @@ func TestShortener_Shorten(t *testing.T) {
 				repo:    tt.fields.repo,
 				baseURL: tt.fields.baseURL,
 			}
-			got, err := s.Shorten(tt.args.url)
+			got, err := s.Shorten(context.Background(), tt.args.url)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Shorten() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if strings.HasPrefix(got, tt.wantPrefix) != true {
 				t.Errorf("Shorten() got = %v, wanted prefix %v", got, tt.wantPrefix)
+			}
+		})
+	}
+}
+
+func TestShortener_Shorten_Conflict(t *testing.T) {
+	storage := newTestStorage(map[string]string{"abc": "https://google.com"})
+	s := NewShortener(storage, "http://localhost:8080/")
+	got, err := s.Shorten(context.Background(), "https://google.com")
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("Shorten() error = %v, want %v", err, ErrConflict)
+	}
+	if got != "http://localhost:8080/abc" {
+		t.Errorf("Shorten() got = %q, want existing %q", got, "http://localhost:8080/abc")
+	}
+	if len(storage.urls) != 1 {
+		t.Errorf("stored urls = %d, want 1", len(storage.urls))
+	}
+}
+
+func TestShortener_Shorten_ConflictLookupFails(t *testing.T) {
+	errDB := errors.New("db is down")
+	storage := &failingLookupStorage{
+		testStorage: newTestStorage(map[string]string{"abc": "https://google.com"}),
+		err:         errDB,
+	}
+	s := NewShortener(storage, "http://localhost:8080/")
+	got, err := s.Shorten(context.Background(), "https://google.com")
+	if !errors.Is(err, errDB) {
+		t.Fatalf("Shorten() error = %v, want %v", err, errDB)
+	}
+	if got != "" {
+		t.Errorf("Shorten() got = %q, want empty", got)
+	}
+}
+
+func TestShortener_GetShortURLByOriginalURL(t *testing.T) {
+	tests := []struct {
+		name        string
+		originalURL string
+		want        string
+		wantErr     error
+	}{
+		{name: "success", originalURL: "https://google.com", want: "http://localhost:8080/abc"},
+		{name: "not found", originalURL: "https://ya.ru", wantErr: repository.ErrNotFound},
+		{name: "empty url", originalURL: "", wantErr: ErrIncorrectInput},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := NewShortener(newTestStorage(map[string]string{"abc": "https://google.com"}), "http://localhost:8080/")
+			got, err := s.GetShortURLByOriginalURL(context.Background(), tt.originalURL)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("GetShortURLByOriginalURL() error = %v, want %v", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Errorf("GetShortURLByOriginalURL() got = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestShortener_ShortenBatch(t *testing.T) {
+	storage := newTestStorage(map[string]string{})
+	s := NewShortener(storage, "http://localhost:8080/")
+	items := []model.BatchItem{
+		{CorrelationID: "a1", OriginalURL: "http://yandex.ru"},
+		{CorrelationID: "b2", OriginalURL: "http://ya.ru"},
+	}
+	got, conflict, err := s.ShortenBatch(context.Background(), items)
+	if err != nil {
+		t.Fatalf("ShortenBatch() error = %v", err)
+	}
+	if conflict {
+		t.Errorf("ShortenBatch() conflict = true, want false")
+	}
+	if len(got) != len(items) {
+		t.Fatalf("ShortenBatch() results = %d, want %d", len(got), len(items))
+	}
+	seen := make(map[string]struct{}, len(got))
+	for i, res := range got {
+		if res.CorrelationID != items[i].CorrelationID {
+			t.Errorf("result[%d] correlation_id = %q, want %q", i, res.CorrelationID, items[i].CorrelationID)
+		}
+		id, ok := strings.CutPrefix(res.ShortURL, "http://localhost:8080/")
+		if !ok || len(id) != idLength {
+			t.Errorf("result[%d] short_url = %q, want base URL + id of length %d", i, res.ShortURL, idLength)
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			t.Errorf("result[%d] id %q is duplicated", i, id)
+		}
+		seen[id] = struct{}{}
+		if original, err := storage.Load(context.Background(), id); err != nil || original != items[i].OriginalURL {
+			t.Errorf("Load(%q) = %q, %v, want %q, nil", id, original, err, items[i].OriginalURL)
+		}
+	}
+}
+
+func TestShortener_ShortenBatch_Conflict(t *testing.T) {
+	const base = "http://localhost:8080/"
+	tests := []struct {
+		name         string
+		stored       map[string]string
+		items        []model.BatchItem
+		wantConflict bool
+		wantStored   int
+		wantExisting map[string]string
+	}{
+		{
+			name:   "some urls already shortened",
+			stored: map[string]string{"existing": "http://yandex.ru"},
+			items: []model.BatchItem{
+				{CorrelationID: "a1", OriginalURL: "http://yandex.ru"},
+				{CorrelationID: "b2", OriginalURL: "http://ya.ru"},
+			},
+			wantConflict: true,
+			wantStored:   2,
+			wantExisting: map[string]string{"a1": base + "existing"},
+		},
+		{
+			name:   "all urls already shortened",
+			stored: map[string]string{"first": "http://yandex.ru", "second": "http://ya.ru"},
+			items: []model.BatchItem{
+				{CorrelationID: "a1", OriginalURL: "http://yandex.ru"},
+				{CorrelationID: "b2", OriginalURL: "http://ya.ru"},
+			},
+			wantConflict: true,
+			wantStored:   2,
+			wantExisting: map[string]string{"a1": base + "first", "b2": base + "second"},
+		},
+		{
+			name:   "same url twice in batch",
+			stored: map[string]string{},
+			items: []model.BatchItem{
+				{CorrelationID: "a1", OriginalURL: "http://yandex.ru"},
+				{CorrelationID: "b2", OriginalURL: "http://yandex.ru"},
+			},
+			wantConflict: false,
+			wantStored:   1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			storage := newTestStorage(tt.stored)
+			s := NewShortener(storage, base)
+			got, conflict, err := s.ShortenBatch(context.Background(), tt.items)
+			if err != nil {
+				t.Fatalf("ShortenBatch() error = %v", err)
+			}
+			if conflict != tt.wantConflict {
+				t.Errorf("ShortenBatch() conflict = %v, want %v", conflict, tt.wantConflict)
+			}
+			if len(got) != len(tt.items) {
+				t.Fatalf("ShortenBatch() results = %d, want %d", len(got), len(tt.items))
+			}
+			if len(storage.urls) != tt.wantStored {
+				t.Errorf("stored urls = %d, want %d", len(storage.urls), tt.wantStored)
+			}
+			byOriginal := make(map[string]string, len(got))
+			for i, res := range got {
+				if res.CorrelationID != tt.items[i].CorrelationID {
+					t.Errorf("result[%d] correlation_id = %q, want %q", i, res.CorrelationID, tt.items[i].CorrelationID)
+				}
+				if want, ok := tt.wantExisting[res.CorrelationID]; ok && res.ShortURL != want {
+					t.Errorf("result[%d] short_url = %q, want existing %q", i, res.ShortURL, want)
+				}
+				id, _ := strings.CutPrefix(res.ShortURL, base)
+				if original, err := storage.Load(context.Background(), id); err != nil || original != tt.items[i].OriginalURL {
+					t.Errorf("Load(%q) = %q, %v, want %q, nil", id, original, err, tt.items[i].OriginalURL)
+				}
+				if prev, ok := byOriginal[tt.items[i].OriginalURL]; ok && prev != res.ShortURL {
+					t.Errorf("result[%d] short_url = %q, want %q for the same url", i, res.ShortURL, prev)
+				}
+				byOriginal[tt.items[i].OriginalURL] = res.ShortURL
+			}
+		})
+	}
+}
+
+func TestShortener_ShortenBatch_LookupFails(t *testing.T) {
+	errDB := errors.New("db is down")
+	storage := &failingLookupStorage{testStorage: newTestStorage(map[string]string{}), err: errDB}
+	s := NewShortener(storage, "http://localhost:8080/")
+	_, _, err := s.ShortenBatch(context.Background(), []model.BatchItem{
+		{CorrelationID: "a1", OriginalURL: "http://yandex.ru"},
+	})
+	if !errors.Is(err, errDB) {
+		t.Fatalf("ShortenBatch() error = %v, want %v", err, errDB)
+	}
+	if len(storage.urls) != 0 {
+		t.Errorf("stored urls = %d, want 0", len(storage.urls))
+	}
+}
+
+func TestShortener_ShortenBatch_IncorrectInput(t *testing.T) {
+	tests := []struct {
+		name  string
+		items []model.BatchItem
+	}{
+		{name: "nil batch", items: nil},
+		{name: "empty batch", items: []model.BatchItem{}},
+		{name: "empty url", items: []model.BatchItem{
+			{CorrelationID: "a1", OriginalURL: "http://yandex.ru"},
+			{CorrelationID: "b2", OriginalURL: " "},
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			storage := newTestStorage(map[string]string{})
+			s := NewShortener(storage, "http://localhost:8080/")
+			if _, _, err := s.ShortenBatch(context.Background(), tt.items); !errors.Is(err, ErrIncorrectInput) {
+				t.Fatalf("ShortenBatch() error = %v, want %v", err, ErrIncorrectInput)
+			}
+			if len(storage.urls) != 0 {
+				t.Errorf("stored urls = %d, want 0", len(storage.urls))
+			}
+		})
+	}
+}
+
+func TestShortener_ShortenBatch_Retries(t *testing.T) {
+	errDB := errors.New("db is down")
+	tests := []struct {
+		name      string
+		batchErrs []error
+		wantErr   error
+		wantCalls int
+	}{
+		{name: "collision then success", batchErrs: []error{repository.ErrAlreadyExists}, wantCalls: 2},
+		{name: "collisions exhaust retries",
+			batchErrs: []error{repository.ErrAlreadyExists, repository.ErrAlreadyExists, repository.ErrAlreadyExists,
+				repository.ErrAlreadyExists, repository.ErrAlreadyExists},
+			wantErr: ErrIDGeneration, wantCalls: maxIDGenerateRetries},
+		{name: "conflict on save is retried", batchErrs: []error{repository.ErrConflict}, wantCalls: 2},
+		{name: "storage error is not retried", batchErrs: []error{errDB}, wantErr: errDB, wantCalls: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			storage := &failingBatchStorage{testStorage: newTestStorage(map[string]string{}), errs: tt.batchErrs}
+			s := NewShortener(storage, "http://localhost:8080/")
+			got, _, err := s.ShortenBatch(context.Background(), []model.BatchItem{
+				{CorrelationID: "a1", OriginalURL: "http://yandex.ru"},
+			})
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("ShortenBatch() error = %v, want %v", err, tt.wantErr)
+			}
+			if tt.wantErr == nil && len(got) != 1 {
+				t.Errorf("ShortenBatch() results = %d, want 1", len(got))
+			}
+			if storage.calls != tt.wantCalls {
+				t.Errorf("SaveBatch() calls = %d, want %d", storage.calls, tt.wantCalls)
 			}
 		})
 	}
@@ -186,27 +439,47 @@ func Test_generateID(t *testing.T) {
 }
 
 type testStorage struct {
-	mu   sync.RWMutex
-	urls map[string]string
+	mu         sync.RWMutex
+	urls       map[string]string
+	byOriginal map[string]string
+}
+
+func (t *testStorage) GetShortURLByOriginalURL(ctx context.Context, originalURL string) (string, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	shortID, ok := t.byOriginal[originalURL]
+	if !ok {
+		return "", repository.ErrNotFound
+	}
+	return shortID, nil
 }
 
 func newTestStorage(m map[string]string) *testStorage {
+	byOriginal := make(map[string]string, len(m))
+	for id, originalURL := range m {
+		byOriginal[originalURL] = id
+	}
 	return &testStorage{
-		urls: m,
+		urls:       m,
+		byOriginal: byOriginal,
 	}
 }
 
-func (t *testStorage) Save(id string, originalURL string) error {
+func (t *testStorage) Save(ctx context.Context, id string, originalURL string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if _, ok := t.urls[id]; ok {
 		return repository.ErrAlreadyExists
 	}
+	if _, ok := t.byOriginal[originalURL]; ok {
+		return repository.ErrConflict
+	}
 	t.urls[id] = originalURL
+	t.byOriginal[originalURL] = id
 	return nil
 }
 
-func (t *testStorage) Load(id string) (originalURL string, err error) {
+func (t *testStorage) Load(ctx context.Context, id string) (originalURL string, err error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	originalURL, ok := t.urls[id]
@@ -214,4 +487,47 @@ func (t *testStorage) Load(id string) (originalURL string, err error) {
 		return "", errors.New("not found")
 	}
 	return originalURL, nil
+}
+
+func (t *testStorage) SaveBatch(ctx context.Context, urls []model.URL) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	seen := make(map[string]struct{}, len(urls))
+	for _, u := range urls {
+		if _, ok := t.urls[u.ShortID]; ok {
+			return repository.ErrAlreadyExists
+		}
+		if _, ok := seen[u.ShortID]; ok {
+			return repository.ErrAlreadyExists
+		}
+		seen[u.ShortID] = struct{}{}
+	}
+	for _, u := range urls {
+		t.urls[u.ShortID] = u.OriginalURL
+		t.byOriginal[u.OriginalURL] = u.ShortID
+	}
+	return nil
+}
+
+type failingBatchStorage struct {
+	*testStorage
+	errs  []error
+	calls int
+}
+
+func (f *failingBatchStorage) SaveBatch(ctx context.Context, urls []model.URL) error {
+	f.calls++
+	if f.calls <= len(f.errs) {
+		return f.errs[f.calls-1]
+	}
+	return f.testStorage.SaveBatch(ctx, urls)
+}
+
+type failingLookupStorage struct {
+	*testStorage
+	err error
+}
+
+func (f *failingLookupStorage) GetShortURLByOriginalURL(_ context.Context, _ string) (string, error) {
+	return "", f.err
 }

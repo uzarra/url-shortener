@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+
+	"github.com/uzarra/url-shortener/internal/model"
 )
 
 type record struct {
@@ -68,7 +71,7 @@ func (s *FileStorage) restore() error {
 		if err := dec.Decode(&rec); err != nil {
 			return fmt.Errorf("decode storage record: %w", err)
 		}
-		if err := s.mem.Save(rec.ShortURL, rec.OriginalURL); err != nil {
+		if err := s.mem.Save(context.Background(), rec.ShortURL, rec.OriginalURL); err != nil {
 			return fmt.Errorf("restore record %s: %w", rec.ShortURL, err)
 		}
 		s.count++
@@ -80,38 +83,91 @@ func (s *FileStorage) restore() error {
 	return nil
 }
 
-func (s *FileStorage) Save(id string, originalURL string) error {
+func (s *FileStorage) Save(ctx context.Context, id string, originalURL string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := s.mem.Load(id); err == nil {
+	if _, err := s.mem.Load(ctx, id); err == nil {
 		return ErrAlreadyExists
+	}
+	if _, err := s.mem.GetShortURLByOriginalURL(ctx, originalURL); err == nil {
+		return ErrConflict
 	}
 	rec := record{
 		UUID:        strconv.Itoa(s.count + 1),
 		ShortURL:    id,
 		OriginalURL: originalURL,
 	}
-	if err := s.appendRecord(rec); err != nil {
+	if err := s.appendRecords([]record{rec}); err != nil {
 		return err
 	}
 	s.count++
-	return s.mem.Save(id, originalURL)
+	return s.mem.Save(ctx, id, originalURL)
 }
 
-func (s *FileStorage) appendRecord(rec record) error {
-	data, err := json.Marshal(rec)
-	if err != nil {
-		return fmt.Errorf("marshal record: %w", err)
-	}
-	offset, prefix := s.end, ",\n  "
-	if s.count == 0 {
-		offset, prefix = 0, "[\n  "
-	}
-	buf := make([]byte, 0, len(prefix)+len(data)+len(arrayEnd))
-	buf = append(buf, prefix...)
-	buf = append(buf, data...)
-	buf = append(buf, arrayEnd...)
+func (s *FileStorage) Load(ctx context.Context, id string) (string, error) {
+	return s.mem.Load(ctx, id)
+}
 
+func (s *FileStorage) SaveBatch(ctx context.Context, urls []model.URL) error {
+	if len(urls) == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	seen := make(map[string]struct{}, len(urls))
+	seenOriginal := make(map[string]struct{}, len(urls))
+	recs := make([]record, 0, len(urls))
+	for i, u := range urls {
+		if _, err := s.mem.Load(ctx, u.ShortID); err == nil {
+			return ErrAlreadyExists
+		}
+		if _, err := s.mem.GetShortURLByOriginalURL(ctx, u.OriginalURL); err == nil {
+			return ErrConflict
+		}
+		if _, ok := seen[u.ShortID]; ok {
+			return ErrAlreadyExists
+		}
+		if _, ok := seenOriginal[u.OriginalURL]; ok {
+			return ErrConflict
+		}
+		seen[u.ShortID] = struct{}{}
+		seenOriginal[u.OriginalURL] = struct{}{}
+		recs = append(recs, record{
+			UUID:        strconv.Itoa(s.count + i + 1),
+			ShortURL:    u.ShortID,
+			OriginalURL: u.OriginalURL,
+		})
+	}
+	if err := s.appendRecords(recs); err != nil {
+		return err
+	}
+	s.count += len(recs)
+	return s.mem.SaveBatch(ctx, urls)
+}
+
+func (s *FileStorage) GetShortURLByOriginalURL(ctx context.Context, originalURL string) (string, error) {
+	return s.mem.GetShortURLByOriginalURL(ctx, originalURL)
+}
+
+func (s *FileStorage) appendRecords(recs []record) error {
+	offset := s.end
+	if s.count == 0 {
+		offset = 0
+	}
+	var buf []byte
+	for i, rec := range recs {
+		data, err := json.Marshal(rec)
+		if err != nil {
+			return fmt.Errorf("marshal record: %w", err)
+		}
+		prefix := ",\n  "
+		if s.count == 0 && i == 0 {
+			prefix = "[\n  "
+		}
+		buf = append(buf, prefix...)
+		buf = append(buf, data...)
+	}
+	buf = append(buf, arrayEnd...)
 	f, err := os.OpenFile(s.path, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return fmt.Errorf("open storage file: %w", err)
@@ -130,8 +186,4 @@ func (s *FileStorage) appendRecord(rec record) error {
 	}
 	s.end = newSize - int64(len(arrayEnd))
 	return nil
-}
-
-func (s *FileStorage) Load(id string) (string, error) {
-	return s.mem.Load(id)
 }
