@@ -12,6 +12,7 @@ type Config struct {
 	BaseURL         string `env:"BASE_URL"`
 	FileStoragePath string `env:"FILE_STORAGE_PATH"`
 	DatabaseDSN     string `env:"DATABASE_DSN"`
+	SecretKey       string `env:"SECRET_KEY"`
 }
 
 func Load() (*Config, error) {
@@ -20,9 +21,13 @@ func Load() (*Config, error) {
 	flag.StringVar(&cfg.BaseURL, "b", "http://localhost:8080/", "baseURL of shortened url")
 	flag.StringVar(&cfg.FileStoragePath, "f", "", "path to file storage")
 	flag.StringVar(&cfg.DatabaseDSN, "d", "", "database connection string")
+	flag.StringVar(&cfg.SecretKey, "k", "dev-secret", "secret key for auth tokens")
 	flag.Parse()
 	if err := env.Parse(&cfg); err != nil {
 		return nil, fmt.Errorf("parse env: %w", err)
+	}
+	if cfg.SecretKey == "" {
+		return nil, fmt.Errorf("secret key must not be empty")
 	}
 	return &cfg, nil
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/go-resty/resty/v2"
 	"github.com/uzarra/url-shortener/internal/api"
@@ -14,11 +15,12 @@ import (
 func main() {
 	endpoint := "http://localhost:8080"
 	contentType := "Content-Type"
+	base := fmt.Sprintf("http://yandex.ru/client/%d", time.Now().UnixNano())
 	client := resty.New().
 		SetRedirectPolicy(resty.NoRedirectPolicy())
 	resp, err := client.R().
 		SetHeader(contentType, "text/plain").
-		SetBody(`http://yandex.ru`).
+		SetBody(base + "/plain").
 		Post(endpoint)
 	if err != nil {
 		panic(err)
@@ -34,7 +36,7 @@ func main() {
 	printResponse("GET /{id}", getResp)
 
 	shortenRequest := api.ShortenRequest{
-		URL: "http://yandex.ru",
+		URL: base + "/json",
 	}
 	shortenRequestBytes, err := json.Marshal(shortenRequest)
 	if err != nil {
@@ -74,7 +76,7 @@ func main() {
 		SetHeader(contentType, "text/plain").
 		SetHeader(contentEncoding, "gzip").
 		SetHeader(acceptEncoding, "gzip").
-		SetBody(gzipBody(`http://yandex.ru`)).
+		SetBody(gzipBody(base + "/gzip-plain")).
 		Post(endpoint)
 	if err != nil {
 		panic(err)
@@ -84,12 +86,26 @@ func main() {
 	gzipNoTypeResponse, err := client.R().
 		SetHeader(contentEncoding, "gzip").
 		SetHeader(acceptEncoding, "gzip").
-		SetBody(gzipBody(`http://yandex.ru`)).
+		SetBody(gzipBody(base + "/gzip-notype")).
 		Post(endpoint)
 	if err != nil {
 		panic(err)
 	}
 	printResponse("POST / gzip запрос без Content-Type", gzipNoTypeResponse)
+
+	userURLsResponse, err := client.R().
+		Get(endpoint + "/api/user/urls")
+	if err != nil {
+		panic(err)
+	}
+	printResponse("GET /api/user/urls тот же клиент", userURLsResponse)
+
+	newClientResponse, err := resty.New().R().
+		Get(endpoint + "/api/user/urls")
+	if err != nil {
+		panic(err)
+	}
+	printResponse("GET /api/user/urls новый клиент", newClientResponse)
 }
 
 const (
@@ -113,4 +129,6 @@ func printResponse(name string, resp *resty.Response) {
 	fmt.Printf("%s: Статус-код %s\n", name, resp.Status())
 	fmt.Printf("  response headers = %s\n", resp.Header())
 	fmt.Printf("  response is = %s\n", resp.String())
+	fmt.Printf("  response cookie = %s\n", resp.Cookies())
+	fmt.Printf("  request cookie = %s\n", resp.Request.RawRequest.Cookies())
 }

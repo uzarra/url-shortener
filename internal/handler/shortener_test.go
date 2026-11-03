@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
+	"github.com/uzarra/url-shortener/internal/auth"
 	"github.com/uzarra/url-shortener/internal/model"
 	"github.com/uzarra/url-shortener/internal/service"
 )
@@ -279,7 +280,8 @@ func TestHandler_ShortenBatch_Gzip(t *testing.T) {
 	request.Header.Set("Content-Encoding", "gzip")
 	request.Header.Set("Accept-Encoding", "gzip")
 	rec := httptest.NewRecorder()
-	router := NewRouter(New(newTestShortener(), &testPinger{}), zerolog.Nop())
+	authManager := auth.NewManager([]byte("test"), auth.TokenTTL)
+	router := NewRouter(New(newTestShortener(), &testPinger{}), zerolog.Nop(), authManager)
 	router.ServeHTTP(rec, request)
 
 	assert.Equal(t, http.StatusCreated, rec.Code)
@@ -366,15 +368,15 @@ func newTestShortener() Shortener {
 	return &testShortener{}
 }
 
-func (t *testShortener) Shorten(_ context.Context, _ string) (string, error) {
+func (t *testShortener) Shorten(_ context.Context, _ string, _ string) (string, error) {
 	return "http://localhost:8080/qwe123qw", nil
 }
 
-func (t *testShortener) Expand(_ context.Context, id string) (string, error) {
+func (t *testShortener) Expand(_ context.Context, _ string) (string, error) {
 	return "https://yandex.ru", nil
 }
 
-func (t *testShortener) ShortenBatch(_ context.Context, batchItems []model.BatchItem) ([]model.BatchResult, bool, error) {
+func (t *testShortener) ShortenBatch(_ context.Context, batchItems []model.BatchItem, _ string) ([]model.BatchResult, bool, error) {
 	results := make([]model.BatchResult, len(batchItems))
 	for i, item := range batchItems {
 		results[i] = model.BatchResult{
@@ -385,14 +387,22 @@ func (t *testShortener) ShortenBatch(_ context.Context, batchItems []model.Batch
 	return results, false, nil
 }
 
+func (t *testShortener) GetUserURLs(_ context.Context, _ string) ([]model.UserURL, error) {
+	return []model.UserURL{}, nil
+}
+
 type badTestShortener struct {
+}
+
+func (t *badTestShortener) GetUserURLs(_ context.Context, _ string) ([]model.UserURL, error) {
+	return nil, errors.New("bad")
 }
 
 func newBadTestShortener() Shortener {
 	return &badTestShortener{}
 }
 
-func (t *badTestShortener) Shorten(_ context.Context, _ string) (string, error) {
+func (t *badTestShortener) Shorten(_ context.Context, _ string, _ string) (string, error) {
 	return "", errors.New("bad")
 }
 
@@ -400,7 +410,7 @@ func (t *badTestShortener) Expand(_ context.Context, _ string) (string, error) {
 	return "", errors.New("bad")
 }
 
-func (t *badTestShortener) ShortenBatch(_ context.Context, _ []model.BatchItem) ([]model.BatchResult, bool, error) {
+func (t *badTestShortener) ShortenBatch(_ context.Context, _ []model.BatchItem, _ string) ([]model.BatchResult, bool, error) {
 	return nil, false, errors.New("bad")
 }
 
@@ -408,12 +418,12 @@ type conflictTestShortener struct {
 	testShortener
 }
 
-func (t *conflictTestShortener) Shorten(_ context.Context, _ string) (string, error) {
+func (t *conflictTestShortener) Shorten(_ context.Context, _ string, _ string) (string, error) {
 	return "http://localhost:8080/existing", service.ErrConflict
 }
 
-func (t *conflictTestShortener) ShortenBatch(ctx context.Context, batchItems []model.BatchItem) ([]model.BatchResult, bool, error) {
-	results, _, err := t.testShortener.ShortenBatch(ctx, batchItems)
+func (t *conflictTestShortener) ShortenBatch(ctx context.Context, batchItems []model.BatchItem, userID string) ([]model.BatchResult, bool, error) {
+	results, _, err := t.testShortener.ShortenBatch(ctx, batchItems, userID)
 	return results, true, err
 }
 

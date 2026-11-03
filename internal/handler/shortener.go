@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/uzarra/url-shortener/internal/api"
+	"github.com/uzarra/url-shortener/internal/auth"
 	"github.com/uzarra/url-shortener/internal/model"
 	"github.com/uzarra/url-shortener/internal/service"
 )
@@ -20,9 +21,10 @@ const maxBodyBytes = 1 << 20
 const headerContentType = "Content-Type"
 
 type Shortener interface {
-	Shorten(ctx context.Context, url string) (string, error)
+	Shorten(ctx context.Context, url string, userID string) (string, error)
 	Expand(ctx context.Context, id string) (string, error)
-	ShortenBatch(ctx context.Context, batchItems []model.BatchItem) ([]model.BatchResult, bool, error)
+	ShortenBatch(ctx context.Context, batchItems []model.BatchItem, userID string) ([]model.BatchResult, bool, error)
+	GetUserURLs(ctx context.Context, userID string) ([]model.UserURL, error)
 }
 
 type Pinger interface {
@@ -53,7 +55,7 @@ func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "empty request body", http.StatusBadRequest)
 		return
 	}
-	shortURL, err := h.svc.Shorten(r.Context(), original)
+	shortURL, err := h.svc.Shorten(r.Context(), original, userIDFromRequest(r))
 	status := http.StatusCreated
 	switch {
 	case errors.Is(err, service.ErrConflict):
@@ -103,7 +105,7 @@ func (h *Handler) ShortenInBody(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "empty url", http.StatusBadRequest)
 		return
 	}
-	shortURL, err := h.svc.Shorten(r.Context(), url)
+	shortURL, err := h.svc.Shorten(r.Context(), url, userIDFromRequest(r))
 	status := http.StatusCreated
 	switch {
 	case errors.Is(err, service.ErrConflict):
@@ -172,7 +174,7 @@ func (h *Handler) ShortenBatch(w http.ResponseWriter, r *http.Request) {
 			OriginalURL:   url,
 		}
 	}
-	batchResults, conflict, err := h.svc.ShortenBatch(r.Context(), batchItems)
+	batchResults, conflict, err := h.svc.ShortenBatch(r.Context(), batchItems, userIDFromRequest(r))
 	if err != nil {
 		http.Error(w, "failed to generate id", http.StatusInternalServerError)
 		return
@@ -195,5 +197,42 @@ func (h *Handler) ShortenBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set(headerContentType, "application/json")
 	w.WriteHeader(status)
+	w.Write(jsonData)
+}
+
+func userIDFromRequest(r *http.Request) string {
+	userID, _ := auth.UserIDFromContext(r.Context())
+	return userID
+}
+
+func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
+	userID, ok := auth.UserIDFromContext(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	userURLs, err := h.svc.GetUserURLs(r.Context(), userID)
+	if err != nil {
+		http.Error(w, "failed to get user urls", http.StatusInternalServerError)
+		return
+	}
+	if len(userURLs) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	response := make([]api.UserURLResponseItem, len(userURLs))
+	for i, u := range userURLs {
+		response[i] = api.UserURLResponseItem{
+			ShortURL:    u.ShortURL,
+			OriginalURL: u.OriginalURL,
+		}
+	}
+	jsonData, err := json.Marshal(response)
+	if err != nil {
+		http.Error(w, "failed to marshal", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set(headerContentType, "application/json")
+	w.WriteHeader(http.StatusOK)
 	w.Write(jsonData)
 }

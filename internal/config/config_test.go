@@ -11,7 +11,10 @@ const (
 	defaultAddr            = ":8080"
 	defaultBase            = "http://localhost:8080/"
 	defaultFileStoragePath = ""
+	defaultSecretKey       = "dev-secret"
 )
+
+var envKeys = []string{"SERVER_ADDRESS", "BASE_URL", "FILE_STORAGE_PATH", "DATABASE_DSN", "SECRET_KEY"}
 
 func resetCLI(t *testing.T, args ...string) {
 	t.Helper()
@@ -41,19 +44,21 @@ func clearEnv(t *testing.T, keys ...string) {
 
 func TestLoad(t *testing.T) {
 	tests := []struct {
-		name     string
-		env      map[string]string
-		args     []string
-		wantAddr string
-		wantBase string
-		wantFile string
-		wantDSN  string
+		name          string
+		env           map[string]string
+		args          []string
+		wantAddr      string
+		wantBase      string
+		wantFile      string
+		wantDSN       string
+		wantSecretKey string
 	}{
 		{
-			name:     "defaults when neither env nor flags are set",
-			wantAddr: defaultAddr,
-			wantBase: defaultBase,
-			wantFile: defaultFileStoragePath,
+			name:          "defaults when neither env nor flags are set",
+			wantAddr:      defaultAddr,
+			wantBase:      defaultBase,
+			wantFile:      defaultFileStoragePath,
+			wantSecretKey: defaultSecretKey,
 		},
 		{
 			name: "env vars are used",
@@ -61,54 +66,62 @@ func TestLoad(t *testing.T) {
 				"SERVER_ADDRESS":    ":9090",
 				"BASE_URL":          "http://env.kz/",
 				"FILE_STORAGE_PATH": "test.json",
+				"SECRET_KEY":        "test-secret",
 			},
-			wantAddr: ":9090",
-			wantBase: "http://env.kz/",
-			wantFile: "test.json",
+			wantAddr:      ":9090",
+			wantBase:      "http://env.kz/",
+			wantFile:      "test.json",
+			wantSecretKey: "test-secret",
 		},
 		{
-			name:     "flags are used when env is absent",
-			args:     []string{"-a", ":7070", "-b", "http://cli.kz/", "-f", "flag_test.json"},
-			wantAddr: ":7070",
-			wantBase: "http://cli.kz/",
-			wantFile: "flag_test.json",
+			name:          "flags are used when env is absent",
+			args:          []string{"-a", ":7070", "-b", "http://cli.kz/", "-f", "flag_test.json", "-k", "secret_key"},
+			wantAddr:      ":7070",
+			wantBase:      "http://cli.kz/",
+			wantFile:      "flag_test.json",
+			wantSecretKey: "secret_key",
 		},
 		{
-			name:     "env for serverAddr, flag for baseUrl, flag for fileStoragePath",
-			env:      map[string]string{"SERVER_ADDRESS": ":9090"},
-			args:     []string{"-b", "http://cli.kz/", "-f", "flag_test.json"},
-			wantAddr: ":9090",
-			wantBase: "http://cli.kz/",
-			wantFile: "flag_test.json",
+			name:          "env for serverAddr, flag for baseUrl, flag for fileStoragePath",
+			env:           map[string]string{"SERVER_ADDRESS": ":9090"},
+			args:          []string{"-b", "http://cli.kz/", "-f", "flag_test.json"},
+			wantAddr:      ":9090",
+			wantBase:      "http://cli.kz/",
+			wantFile:      "flag_test.json",
+			wantSecretKey: defaultSecretKey,
 		},
 		{
-			name:     "env for baseUrl, flag for serverAddr, env for fileStoragePath",
-			env:      map[string]string{"BASE_URL": "http://env.kz/", "FILE_STORAGE_PATH": "test.json"},
-			args:     []string{"-a", ":8090"},
-			wantAddr: ":8090",
-			wantBase: "http://env.kz/",
-			wantFile: "test.json",
+			name:          "env for baseUrl, flag for serverAddr, env for fileStoragePath",
+			env:           map[string]string{"BASE_URL": "http://env.kz/", "FILE_STORAGE_PATH": "test.json"},
+			args:          []string{"-a", ":8090"},
+			wantAddr:      ":8090",
+			wantBase:      "http://env.kz/",
+			wantFile:      "test.json",
+			wantSecretKey: defaultSecretKey,
 		},
 		{
-			name:     "default baseUrl",
-			args:     []string{"-a", ":8090", "-f", "flag_test.json"},
-			wantAddr: ":8090",
-			wantBase: defaultBase,
-			wantFile: "flag_test.json",
+			name:          "default baseUrl",
+			args:          []string{"-a", ":8090", "-f", "flag_test.json"},
+			wantAddr:      ":8090",
+			wantBase:      defaultBase,
+			wantFile:      "flag_test.json",
+			wantSecretKey: defaultSecretKey,
 		},
 		{
-			name:     "default serverAddr",
-			args:     []string{"-b", "http://cli.kz/", "-f", "flag_test.json"},
-			wantAddr: defaultAddr,
-			wantBase: "http://cli.kz/",
-			wantFile: "flag_test.json",
+			name:          "default serverAddr",
+			args:          []string{"-b", "http://cli.kz/", "-f", "flag_test.json"},
+			wantAddr:      defaultAddr,
+			wantBase:      "http://cli.kz/",
+			wantFile:      "flag_test.json",
+			wantSecretKey: defaultSecretKey,
 		},
 		{
-			name:     "default fileStoragePath",
-			args:     []string{"-a", ":8090", "-b", "http://cli.kz/"},
-			wantAddr: ":8090",
-			wantBase: "http://cli.kz/",
-			wantFile: defaultFileStoragePath,
+			name:          "default fileStoragePath",
+			args:          []string{"-a", ":8090", "-b", "http://cli.kz/"},
+			wantAddr:      ":8090",
+			wantBase:      "http://cli.kz/",
+			wantFile:      defaultFileStoragePath,
+			wantSecretKey: defaultSecretKey,
 		},
 		{
 			name: "both env vars and flags exist but env vars win",
@@ -116,54 +129,70 @@ func TestLoad(t *testing.T) {
 				"SERVER_ADDRESS":    ":9090",
 				"BASE_URL":          "http://env.kz/",
 				"FILE_STORAGE_PATH": "test.json",
+				"SECRET_KEY":        "test-secret",
 			},
 			args: []string{
 				"-a", ":7070",
 				"-b", "http://cli.kz/",
 				"-f", "flag_test.json",
+				"-k", "secret_key",
 			},
-			wantAddr: ":9090",
-			wantBase: "http://env.kz/",
-			wantFile: "test.json",
+			wantAddr:      ":9090",
+			wantBase:      "http://env.kz/",
+			wantFile:      "test.json",
+			wantSecretKey: "test-secret",
 		},
 		{
-			name:     "database dsn from env",
-			env:      map[string]string{"DATABASE_DSN": "postgres://env:5432/db"},
-			wantAddr: defaultAddr,
-			wantBase: defaultBase,
-			wantFile: defaultFileStoragePath,
-			wantDSN:  "postgres://env:5432/db",
+			name:          "database dsn from env",
+			env:           map[string]string{"DATABASE_DSN": "postgres://env:5432/db"},
+			wantAddr:      defaultAddr,
+			wantBase:      defaultBase,
+			wantFile:      defaultFileStoragePath,
+			wantDSN:       "postgres://env:5432/db",
+			wantSecretKey: defaultSecretKey,
 		},
 		{
-			name:     "database dsn from flag",
-			args:     []string{"-d", "postgres://cli:5432/db"},
-			wantAddr: defaultAddr,
-			wantBase: defaultBase,
-			wantFile: defaultFileStoragePath,
-			wantDSN:  "postgres://cli:5432/db",
+			name:          "database dsn from flag",
+			args:          []string{"-d", "postgres://cli:5432/db"},
+			wantAddr:      defaultAddr,
+			wantBase:      defaultBase,
+			wantFile:      defaultFileStoragePath,
+			wantDSN:       "postgres://cli:5432/db",
+			wantSecretKey: defaultSecretKey,
 		},
 		{
-			name:     "database dsn env wins over flag",
-			env:      map[string]string{"DATABASE_DSN": "postgres://env:5432/db"},
-			args:     []string{"-d", "postgres://cli:5432/db"},
-			wantAddr: defaultAddr,
-			wantBase: defaultBase,
-			wantFile: defaultFileStoragePath,
-			wantDSN:  "postgres://env:5432/db",
+			name:          "database dsn env wins over flag",
+			env:           map[string]string{"DATABASE_DSN": "postgres://env:5432/db"},
+			args:          []string{"-d", "postgres://cli:5432/db"},
+			wantAddr:      defaultAddr,
+			wantBase:      defaultBase,
+			wantFile:      defaultFileStoragePath,
+			wantDSN:       "postgres://env:5432/db",
+			wantSecretKey: defaultSecretKey,
 		},
 		{
-			name:     "database dsn with other flags",
-			args:     []string{"-a", ":7070", "-d", "postgres://cli:5432/db"},
-			wantAddr: ":7070",
-			wantBase: defaultBase,
-			wantFile: defaultFileStoragePath,
-			wantDSN:  "postgres://cli:5432/db",
+			name:          "database dsn with other flags",
+			args:          []string{"-a", ":7070", "-d", "postgres://cli:5432/db"},
+			wantAddr:      ":7070",
+			wantBase:      defaultBase,
+			wantFile:      defaultFileStoragePath,
+			wantDSN:       "postgres://cli:5432/db",
+			wantSecretKey: defaultSecretKey,
+		},
+		{
+			name:          "secret key from flag with other flags",
+			args:          []string{"-a", ":7070", "-k", "secret_key", "-d", "postgres://cli:5432/db"},
+			wantAddr:      ":7070",
+			wantBase:      defaultBase,
+			wantFile:      defaultFileStoragePath,
+			wantDSN:       "postgres://cli:5432/db",
+			wantSecretKey: "secret_key",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			clearEnv(t, "SERVER_ADDRESS", "BASE_URL", "FILE_STORAGE_PATH", "DATABASE_DSN")
+			clearEnv(t, envKeys...)
 			for k, v := range tt.env {
 				t.Setenv(k, v)
 			}
@@ -184,6 +213,44 @@ func TestLoad(t *testing.T) {
 			if cfg.DatabaseDSN != tt.wantDSN {
 				t.Errorf("DatabaseDSN = %q, want %q", cfg.DatabaseDSN, tt.wantDSN)
 			}
+			if cfg.SecretKey != tt.wantSecretKey {
+				t.Errorf("SecretKey = %q, want %q", cfg.SecretKey, tt.wantSecretKey)
+			}
 		})
+	}
+}
+
+func TestLoad_EmptySecretKey(t *testing.T) {
+	clearEnv(t, envKeys...)
+	resetCLI(t, "-k", "")
+
+	cfg, err := Load()
+	if err == nil {
+		t.Fatalf("Load() error = nil, want error for empty secret key (cfg = %+v)", cfg)
+	}
+}
+
+func TestLoad_EmptySecretKeyFromEnv(t *testing.T) {
+	clearEnv(t, envKeys...)
+	t.Setenv("SECRET_KEY", "")
+	resetCLI(t)
+
+	cfg, err := Load()
+	if err == nil && cfg.SecretKey == "" {
+		t.Fatal("Load() returned empty SecretKey without error")
+	}
+}
+
+func TestLoad_EmptyFlagButSecretKeyFromEnv(t *testing.T) {
+	clearEnv(t, envKeys...)
+	t.Setenv("SECRET_KEY", "test-secret")
+	resetCLI(t, "-k", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if cfg.SecretKey != "test-secret" {
+		t.Errorf("SecretKey = %q, want %q", cfg.SecretKey, "test-secret")
 	}
 }

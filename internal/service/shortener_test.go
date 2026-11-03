@@ -149,7 +149,7 @@ func TestShortener_Shorten(t *testing.T) {
 				repo:    tt.fields.repo,
 				baseURL: tt.fields.baseURL,
 			}
-			got, err := s.Shorten(context.Background(), tt.args.url)
+			got, err := s.Shorten(context.Background(), tt.args.url, "")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Shorten() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -164,7 +164,7 @@ func TestShortener_Shorten(t *testing.T) {
 func TestShortener_Shorten_Conflict(t *testing.T) {
 	storage := newTestStorage(map[string]string{"abc": "https://google.com"})
 	s := NewShortener(storage, "http://localhost:8080/")
-	got, err := s.Shorten(context.Background(), "https://google.com")
+	got, err := s.Shorten(context.Background(), "https://google.com", "")
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("Shorten() error = %v, want %v", err, ErrConflict)
 	}
@@ -183,7 +183,7 @@ func TestShortener_Shorten_ConflictLookupFails(t *testing.T) {
 		err:         errDB,
 	}
 	s := NewShortener(storage, "http://localhost:8080/")
-	got, err := s.Shorten(context.Background(), "https://google.com")
+	got, err := s.Shorten(context.Background(), "https://google.com", "")
 	if !errors.Is(err, errDB) {
 		t.Fatalf("Shorten() error = %v, want %v", err, errDB)
 	}
@@ -224,7 +224,7 @@ func TestShortener_ShortenBatch(t *testing.T) {
 		{CorrelationID: "a1", OriginalURL: "http://yandex.ru"},
 		{CorrelationID: "b2", OriginalURL: "http://ya.ru"},
 	}
-	got, conflict, err := s.ShortenBatch(context.Background(), items)
+	got, conflict, err := s.ShortenBatch(context.Background(), items, "")
 	if err != nil {
 		t.Fatalf("ShortenBatch() error = %v", err)
 	}
@@ -301,7 +301,7 @@ func TestShortener_ShortenBatch_Conflict(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			storage := newTestStorage(tt.stored)
 			s := NewShortener(storage, base)
-			got, conflict, err := s.ShortenBatch(context.Background(), tt.items)
+			got, conflict, err := s.ShortenBatch(context.Background(), tt.items, "")
 			if err != nil {
 				t.Fatalf("ShortenBatch() error = %v", err)
 			}
@@ -341,7 +341,7 @@ func TestShortener_ShortenBatch_LookupFails(t *testing.T) {
 	s := NewShortener(storage, "http://localhost:8080/")
 	_, _, err := s.ShortenBatch(context.Background(), []model.BatchItem{
 		{CorrelationID: "a1", OriginalURL: "http://yandex.ru"},
-	})
+	}, "")
 	if !errors.Is(err, errDB) {
 		t.Fatalf("ShortenBatch() error = %v, want %v", err, errDB)
 	}
@@ -366,7 +366,7 @@ func TestShortener_ShortenBatch_IncorrectInput(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			storage := newTestStorage(map[string]string{})
 			s := NewShortener(storage, "http://localhost:8080/")
-			if _, _, err := s.ShortenBatch(context.Background(), tt.items); !errors.Is(err, ErrIncorrectInput) {
+			if _, _, err := s.ShortenBatch(context.Background(), tt.items, ""); !errors.Is(err, ErrIncorrectInput) {
 				t.Fatalf("ShortenBatch() error = %v, want %v", err, ErrIncorrectInput)
 			}
 			if len(storage.urls) != 0 {
@@ -398,7 +398,7 @@ func TestShortener_ShortenBatch_Retries(t *testing.T) {
 			s := NewShortener(storage, "http://localhost:8080/")
 			got, _, err := s.ShortenBatch(context.Background(), []model.BatchItem{
 				{CorrelationID: "a1", OriginalURL: "http://yandex.ru"},
-			})
+			}, "")
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("ShortenBatch() error = %v, want %v", err, tt.wantErr)
 			}
@@ -442,9 +442,10 @@ type testStorage struct {
 	mu         sync.RWMutex
 	urls       map[string]string
 	byOriginal map[string]string
+	byUser     map[string][]string
 }
 
-func (t *testStorage) GetShortURLByOriginalURL(ctx context.Context, originalURL string) (string, error) {
+func (t *testStorage) GetShortURLByOriginalURL(_ context.Context, originalURL string) (string, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	shortID, ok := t.byOriginal[originalURL]
@@ -462,24 +463,28 @@ func newTestStorage(m map[string]string) *testStorage {
 	return &testStorage{
 		urls:       m,
 		byOriginal: byOriginal,
+		byUser:     make(map[string][]string),
 	}
 }
 
-func (t *testStorage) Save(ctx context.Context, id string, originalURL string) error {
+func (t *testStorage) Save(_ context.Context, url model.URL) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if _, ok := t.urls[id]; ok {
+	if _, ok := t.urls[url.ShortID]; ok {
 		return repository.ErrAlreadyExists
 	}
-	if _, ok := t.byOriginal[originalURL]; ok {
+	if _, ok := t.byOriginal[url.OriginalURL]; ok {
 		return repository.ErrConflict
 	}
-	t.urls[id] = originalURL
-	t.byOriginal[originalURL] = id
+	t.urls[url.ShortID] = url.OriginalURL
+	t.byOriginal[url.OriginalURL] = url.ShortID
+	if url.UserID != "" {
+		t.byUser[url.UserID] = append(t.byUser[url.UserID], url.ShortID)
+	}
 	return nil
 }
 
-func (t *testStorage) Load(ctx context.Context, id string) (originalURL string, err error) {
+func (t *testStorage) Load(_ context.Context, id string) (originalURL string, err error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	originalURL, ok := t.urls[id]
@@ -489,7 +494,7 @@ func (t *testStorage) Load(ctx context.Context, id string) (originalURL string, 
 	return originalURL, nil
 }
 
-func (t *testStorage) SaveBatch(ctx context.Context, urls []model.URL) error {
+func (t *testStorage) SaveBatch(_ context.Context, urls []model.URL) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	seen := make(map[string]struct{}, len(urls))
@@ -505,8 +510,31 @@ func (t *testStorage) SaveBatch(ctx context.Context, urls []model.URL) error {
 	for _, u := range urls {
 		t.urls[u.ShortID] = u.OriginalURL
 		t.byOriginal[u.OriginalURL] = u.ShortID
+		if u.UserID != "" {
+			t.byUser[u.UserID] = append(t.byUser[u.UserID], u.ShortID)
+		}
 	}
 	return nil
+}
+
+func (t *testStorage) GetURLsByUserID(_ context.Context, userID string) ([]model.URL, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	ids := t.byUser[userID]
+	result := make([]model.URL, 0, len(ids))
+	for _, id := range ids {
+		result = append(result, model.URL{ShortID: id, OriginalURL: t.urls[id], UserID: userID})
+	}
+	return result, nil
+}
+
+type failingUserURLsStorage struct {
+	*testStorage
+	err error
+}
+
+func (f *failingUserURLsStorage) GetURLsByUserID(_ context.Context, _ string) ([]model.URL, error) {
+	return nil, f.err
 }
 
 type failingBatchStorage struct {

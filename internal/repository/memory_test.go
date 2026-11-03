@@ -11,7 +11,7 @@ import (
 
 func TestStorage_Load(t *testing.T) {
 	s := NewStorage()
-	if err := s.Save(t.Context(), "abc", "http://yandex.ru"); err != nil {
+	if err := s.Save(t.Context(), model.URL{ShortID: "abc", OriginalURL: "http://yandex.ru"}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 	tests := []struct {
@@ -39,10 +39,10 @@ func TestStorage_Load(t *testing.T) {
 
 func TestStorage_SaveDuplicate(t *testing.T) {
 	s := NewStorage()
-	if err := s.Save(t.Context(), "abc", "http://yandex.ru"); err != nil {
+	if err := s.Save(t.Context(), model.URL{ShortID: "abc", OriginalURL: "http://yandex.ru"}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	if err := s.Save(t.Context(), "abc", "http://ya.ru"); !errors.Is(err, ErrAlreadyExists) {
+	if err := s.Save(t.Context(), model.URL{ShortID: "abc", OriginalURL: "http://ya.ru"}); !errors.Is(err, ErrAlreadyExists) {
 		t.Fatalf("Save() duplicate error = %v, want %v", err, ErrAlreadyExists)
 	}
 	if got, _ := s.Load(t.Context(), "abc"); got != "http://yandex.ru" {
@@ -52,10 +52,10 @@ func TestStorage_SaveDuplicate(t *testing.T) {
 
 func TestStorage_SaveConflict(t *testing.T) {
 	s := NewStorage()
-	if err := s.Save(t.Context(), "abc", "http://yandex.ru"); err != nil {
+	if err := s.Save(t.Context(), model.URL{ShortID: "abc", OriginalURL: "http://yandex.ru"}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	if err := s.Save(t.Context(), "def", "http://yandex.ru"); !errors.Is(err, ErrConflict) {
+	if err := s.Save(t.Context(), model.URL{ShortID: "def", OriginalURL: "http://yandex.ru"}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("Save() same original error = %v, want %v", err, ErrConflict)
 	}
 	if _, err := s.Load(t.Context(), "def"); !errors.Is(err, ErrNotFound) {
@@ -68,7 +68,7 @@ func TestStorage_SaveConflict(t *testing.T) {
 
 func TestStorage_GetShortURLByOriginalURL(t *testing.T) {
 	s := NewStorage()
-	if err := s.Save(t.Context(), "abc", "http://yandex.ru"); err != nil {
+	if err := s.Save(t.Context(), model.URL{ShortID: "abc", OriginalURL: "http://yandex.ru"}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 	if err := s.SaveBatch(t.Context(), []model.URL{{ShortID: "edVPg3ks", OriginalURL: "http://ya.ru"}}); err != nil {
@@ -104,7 +104,7 @@ func TestStorage_SaveKeepsSeparateIDs(t *testing.T) {
 		"edVPg3ks": "http://ya.ru",
 	}
 	for id, u := range urls {
-		if err := s.Save(t.Context(), id, u); err != nil {
+		if err := s.Save(t.Context(), model.URL{ShortID: id, OriginalURL: u}); err != nil {
 			t.Fatalf("Save(%q) error = %v", id, err)
 		}
 	}
@@ -124,7 +124,7 @@ func TestStorage_Concurrent(t *testing.T) {
 		id := fmt.Sprintf("id%d", i)
 		go func() {
 			defer wg.Done()
-			if err := s.Save(t.Context(), id, "http://example"+id+".com"); err != nil {
+			if err := s.Save(t.Context(), model.URL{ShortID: id, OriginalURL: "http://example" + id + ".com"}); err != nil {
 				t.Errorf("Save(%q) error = %v", id, err)
 			}
 		}()
@@ -154,7 +154,7 @@ func TestStorage_ConcurrentSameID(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err := s.Save(t.Context(), "same", fmt.Sprintf("http://example.com/%d", i))
+			err := s.Save(t.Context(), model.URL{ShortID: "same", OriginalURL: fmt.Sprintf("http://example.com/%d", i)})
 			if err == nil {
 				mu.Lock()
 				success++
@@ -205,7 +205,7 @@ func TestStorage_SaveBatchDuplicate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := NewStorage()
-			if err := s.Save(t.Context(), "abc", "http://yandex.ru"); err != nil {
+			if err := s.Save(t.Context(), model.URL{ShortID: "abc", OriginalURL: "http://yandex.ru"}); err != nil {
 				t.Fatalf("Save() error = %v", err)
 			}
 			if err := s.SaveBatch(t.Context(), tt.urls); !errors.Is(err, ErrAlreadyExists) {
@@ -223,7 +223,7 @@ func TestStorage_SaveBatchDuplicate(t *testing.T) {
 
 func TestStorage_SaveBatchConflict(t *testing.T) {
 	s := NewStorage()
-	if err := s.Save(t.Context(), "abc", "http://yandex.ru"); err != nil {
+	if err := s.Save(t.Context(), model.URL{ShortID: "abc", OriginalURL: "http://yandex.ru"}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 	err := s.SaveBatch(t.Context(), []model.URL{

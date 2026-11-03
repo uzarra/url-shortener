@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/rs/zerolog"
+	"github.com/uzarra/url-shortener/internal/auth"
 	"github.com/uzarra/url-shortener/internal/config"
 	"github.com/uzarra/url-shortener/internal/handler"
 	"github.com/uzarra/url-shortener/internal/logger"
@@ -33,7 +34,8 @@ func main() {
 	}
 	svc := service.NewShortener(repo, cfg.BaseURL)
 	h := handler.New(svc, pinger)
-	router := handler.NewRouter(h, log)
+	authManager := auth.NewManager([]byte(cfg.SecretKey), auth.TokenTTL)
+	router := handler.NewRouter(h, log, authManager)
 	log.Info().Str("addr", cfg.ServerAddr).Msg("starting server")
 	if err := http.ListenAndServe(cfg.ServerAddr, router); err != nil {
 		log.Fatal().Err(err).Msg("server stopped")

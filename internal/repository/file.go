@@ -18,6 +18,7 @@ type record struct {
 	UUID        string `json:"uuid"`
 	ShortURL    string `json:"short_url"`
 	OriginalURL string `json:"original_url"`
+	UserID      string `json:"user_id,omitempty"`
 }
 
 const arrayEnd = "\n]\n"
@@ -68,11 +69,15 @@ func (s *FileStorage) restore() error {
 	}
 	for dec.More() {
 		var rec record
-		if err := dec.Decode(&rec); err != nil {
-			return fmt.Errorf("decode storage record: %w", err)
+		if decodeErr := dec.Decode(&rec); decodeErr != nil {
+			return fmt.Errorf("decode storage record: %w", decodeErr)
 		}
-		if err := s.mem.Save(context.Background(), rec.ShortURL, rec.OriginalURL); err != nil {
-			return fmt.Errorf("restore record %s: %w", rec.ShortURL, err)
+		if saveErr := s.mem.Save(context.Background(), model.URL{
+			ShortID:     rec.ShortURL,
+			OriginalURL: rec.OriginalURL,
+			UserID:      rec.UserID,
+		}); saveErr != nil {
+			return fmt.Errorf("restore record %s: %w", rec.ShortURL, saveErr)
 		}
 		s.count++
 		s.end = dec.InputOffset()
@@ -83,25 +88,26 @@ func (s *FileStorage) restore() error {
 	return nil
 }
 
-func (s *FileStorage) Save(ctx context.Context, id string, originalURL string) error {
+func (s *FileStorage) Save(ctx context.Context, url model.URL) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := s.mem.Load(ctx, id); err == nil {
+	if _, err := s.mem.Load(ctx, url.ShortID); err == nil {
 		return ErrAlreadyExists
 	}
-	if _, err := s.mem.GetShortURLByOriginalURL(ctx, originalURL); err == nil {
+	if _, err := s.mem.GetShortURLByOriginalURL(ctx, url.OriginalURL); err == nil {
 		return ErrConflict
 	}
 	rec := record{
 		UUID:        strconv.Itoa(s.count + 1),
-		ShortURL:    id,
-		OriginalURL: originalURL,
+		ShortURL:    url.ShortID,
+		OriginalURL: url.OriginalURL,
+		UserID:      url.UserID,
 	}
 	if err := s.appendRecords([]record{rec}); err != nil {
 		return err
 	}
 	s.count++
-	return s.mem.Save(ctx, id, originalURL)
+	return s.mem.Save(ctx, url)
 }
 
 func (s *FileStorage) Load(ctx context.Context, id string) (string, error) {
@@ -136,6 +142,7 @@ func (s *FileStorage) SaveBatch(ctx context.Context, urls []model.URL) error {
 			UUID:        strconv.Itoa(s.count + i + 1),
 			ShortURL:    u.ShortID,
 			OriginalURL: u.OriginalURL,
+			UserID:      u.UserID,
 		})
 	}
 	if err := s.appendRecords(recs); err != nil {
@@ -147,6 +154,10 @@ func (s *FileStorage) SaveBatch(ctx context.Context, urls []model.URL) error {
 
 func (s *FileStorage) GetShortURLByOriginalURL(ctx context.Context, originalURL string) (string, error) {
 	return s.mem.GetShortURLByOriginalURL(ctx, originalURL)
+}
+
+func (s *FileStorage) GetURLsByUserID(ctx context.Context, userID string) ([]model.URL, error) {
+	return s.mem.GetURLsByUserID(ctx, userID)
 }
 
 func (s *FileStorage) appendRecords(recs []record) error {
