@@ -96,7 +96,7 @@ func TestHandler_GetUserURLs(t *testing.T) {
 			}
 			rec := httptest.NewRecorder()
 
-			New(svc, &testPinger{}).GetUserURLs(rec, req)
+			New(svc, nil, &testPinger{}, zerolog.Nop()).GetUserURLs(rec, req)
 
 			require.Equal(t, tt.wantStatus, rec.Code)
 			if tt.userID != "" {
@@ -119,7 +119,7 @@ func TestHandler_GetUserURLs_JSONFieldNames(t *testing.T) {
 	svc := &recordingShortener{userURLs: []model.UserURL{{ShortURL: "http://s", OriginalURL: "http://o"}}}
 	rec := httptest.NewRecorder()
 
-	New(svc, &testPinger{}).GetUserURLs(rec, withUser(httptest.NewRequest(http.MethodGet, "/api/user/urls", nil), handlerTestUser))
+	New(svc, nil, &testPinger{}, zerolog.Nop()).GetUserURLs(rec, withUser(httptest.NewRequest(http.MethodGet, "/api/user/urls", nil), handlerTestUser))
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.JSONEq(t, `[{"short_url":"http://s","original_url":"http://o"}]`, rec.Body.String())
@@ -149,7 +149,7 @@ func TestHandler_PassUserIDToService(t *testing.T) {
 			}
 			rec := httptest.NewRecorder()
 
-			tt.method(New(svc, &testPinger{}))(rec, withUser(req, handlerTestUser))
+			tt.method(New(svc, nil, &testPinger{}, zerolog.Nop()))(rec, withUser(req, handlerTestUser))
 
 			require.Equal(t, http.StatusCreated, rec.Code)
 			assert.Equal(t, handlerTestUser, svc.gotUserID)
@@ -167,7 +167,7 @@ func newE2ERouter(t *testing.T) (http.Handler, *auth.Manager) {
 	t.Helper()
 	m := auth.NewManager([]byte("handler-test-key"), time.Hour)
 	svc := service.NewShortener(repository.NewStorage(), "http://localhost:8080/")
-	return NewRouter(New(svc, &testPinger{}), zerolog.Nop(), m), m
+	return NewRouter(New(svc, nil, &testPinger{}, zerolog.Nop()), zerolog.Nop(), m), m
 }
 
 func (c *e2eClient) do(method, path, body, contentType string) *httptest.ResponseRecorder {

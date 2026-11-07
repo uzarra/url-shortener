@@ -19,6 +19,7 @@ const (
 var ErrIncorrectInput = errors.New("input is incorrect")
 var ErrIDGeneration = errors.New("id generation failed")
 var ErrConflict = errors.New("url already shortened")
+var ErrDeleted = errors.New("url deleted")
 
 type Repository interface {
 	Save(ctx context.Context, url model.URL) error
@@ -73,6 +74,9 @@ func (s *Shortener) Expand(ctx context.Context, id string) (string, error) {
 		return "", ErrIncorrectInput
 	}
 	originalURL, err := s.repo.Load(ctx, id)
+	if errors.Is(err, repository.ErrDeleted) {
+		return "", ErrDeleted
+	}
 	if err != nil {
 		return "", err
 	}

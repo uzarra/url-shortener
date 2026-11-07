@@ -25,7 +25,9 @@ func serveAuth(t *testing.T, m *auth.Manager, cookie *http.Cookie) authResult {
 	var res authResult
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		res.called = true
-		res.userID, res.hasID = auth.UserIDFromContext(r.Context())
+		var err error
+		res.userID, err = auth.UserIDFromContext(r.Context())
+		res.hasID = err == nil
 		w.WriteHeader(http.StatusTeapot)
 	})
 

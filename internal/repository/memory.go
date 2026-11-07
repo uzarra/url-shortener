@@ -12,6 +12,7 @@ var (
 	ErrNotFound      = errors.New("url not found")
 	ErrAlreadyExists = errors.New("id already exists")
 	ErrConflict      = errors.New("url conflict")
+	ErrDeleted       = errors.New("url deleted")
 )
 
 type Storage struct {
@@ -19,6 +20,8 @@ type Storage struct {
 	urls       map[string]string
 	byOriginal map[string]string
 	byUser     map[string][]string
+	owners     map[string]string
+	deleted    map[string]struct{}
 }
 
 func NewStorage() *Storage {
@@ -26,6 +29,8 @@ func NewStorage() *Storage {
 		urls:       make(map[string]string),
 		byOriginal: make(map[string]string),
 		byUser:     make(map[string][]string),
+		owners:     make(map[string]string),
+		deleted:    make(map[string]struct{}),
 	}
 }
 
@@ -42,6 +47,10 @@ func (s *Storage) Save(_ context.Context, url model.URL) error {
 	s.byOriginal[url.OriginalURL] = url.ShortID
 	if url.UserID != "" {
 		s.byUser[url.UserID] = append(s.byUser[url.UserID], url.ShortID)
+		s.owners[url.ShortID] = url.UserID
+	}
+	if url.DeletedFlag {
+		s.deleted[url.ShortID] = struct{}{}
 	}
 	return nil
 }
@@ -52,6 +61,9 @@ func (s *Storage) Load(_ context.Context, id string) (originalURL string, err er
 	originalURL, ok := s.urls[id]
 	if !ok {
 		return "", ErrNotFound
+	}
+	if _, isDeleted := s.deleted[id]; isDeleted {
+		return "", ErrDeleted
 	}
 	return originalURL, nil
 }
@@ -82,6 +94,10 @@ func (s *Storage) SaveBatch(_ context.Context, urls []model.URL) error {
 		s.byOriginal[u.OriginalURL] = u.ShortID
 		if u.UserID != "" {
 			s.byUser[u.UserID] = append(s.byUser[u.UserID], u.ShortID)
+			s.owners[u.ShortID] = u.UserID
+		}
+		if u.DeletedFlag {
+			s.deleted[u.ShortID] = struct{}{}
 		}
 	}
 	return nil
@@ -103,7 +119,21 @@ func (s *Storage) GetURLsByUserID(_ context.Context, userID string) ([]model.URL
 	ids := s.byUser[userID]
 	result := make([]model.URL, 0, len(ids))
 	for _, id := range ids {
+		if _, isDeleted := s.deleted[id]; isDeleted {
+			continue
+		}
 		result = append(result, model.URL{ShortID: id, OriginalURL: s.urls[id], UserID: userID})
 	}
 	return result, nil
+}
+
+func (s *Storage) DeleteURLs(_ context.Context, reqs []model.DeleteRequest) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, req := range reqs {
+		if owner, ok := s.owners[req.ShortID]; ok && owner == req.UserID {
+			s.deleted[req.ShortID] = struct{}{}
+		}
+	}
+	return nil
 }

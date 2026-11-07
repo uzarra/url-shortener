@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/rs/zerolog"
 	"github.com/uzarra/url-shortener/internal/api"
 	"github.com/uzarra/url-shortener/internal/auth"
 	"github.com/uzarra/url-shortener/internal/model"
@@ -31,16 +32,34 @@ type Pinger interface {
 	PingContext(ctx context.Context) error
 }
 
-type Handler struct {
-	svc  Shortener
-	pngr Pinger
+type Deleter interface {
+	Delete(ctx context.Context, userID string, ids []string) error
 }
 
-func New(svc Shortener, pngr Pinger) *Handler {
+type Handler struct {
+	svc  Shortener
+	del  Deleter
+	pngr Pinger
+	log  zerolog.Logger
+}
+
+func New(svc Shortener, del Deleter, pngr Pinger, log zerolog.Logger) *Handler {
 	return &Handler{
 		svc:  svc,
+		del:  del,
 		pngr: pngr,
+		log:  log,
 	}
+}
+
+func (h *Handler) serverError(w http.ResponseWriter, r *http.Request, status int, msg string, err error) {
+	h.log.Error().
+		Err(err).
+		Str("method", r.Method).
+		Str("path", r.URL.Path).
+		Int("status", status).
+		Msg(msg)
+	http.Error(w, msg, status)
 }
 
 func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
@@ -61,7 +80,7 @@ func (h *Handler) Shorten(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, service.ErrConflict):
 		status = http.StatusConflict
 	case err != nil:
-		http.Error(w, "failed to generate id", http.StatusInternalServerError)
+		h.serverError(w, r, http.StatusInternalServerError, "failed to shorten url", err)
 		return
 	}
 	w.Header().Set(headerContentType, "text/plain")
@@ -76,7 +95,11 @@ func (h *Handler) Expand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	originalURL, err := h.svc.Expand(r.Context(), id)
-	if err != nil {
+	switch {
+	case errors.Is(err, service.ErrDeleted):
+		http.Error(w, "url deleted", http.StatusGone)
+		return
+	case err != nil:
 		http.Error(w, "no such id", http.StatusNotFound)
 		return
 	}
@@ -111,7 +134,7 @@ func (h *Handler) ShortenInBody(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, service.ErrConflict):
 		status = http.StatusConflict
 	case err != nil:
-		http.Error(w, "failed to generate id", http.StatusInternalServerError)
+		h.serverError(w, r, http.StatusInternalServerError, "failed to shorten url", err)
 		return
 	}
 	response := api.ShortenResponse{
@@ -119,7 +142,7 @@ func (h *Handler) ShortenInBody(w http.ResponseWriter, r *http.Request) {
 	}
 	jsonData, err := json.Marshal(response)
 	if err != nil {
-		http.Error(w, "failed to marshal", http.StatusInternalServerError)
+		h.serverError(w, r, http.StatusInternalServerError, "failed to marshal response", err)
 		return
 	}
 	w.Header().Set(headerContentType, "application/json")
@@ -129,13 +152,13 @@ func (h *Handler) ShortenInBody(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) Ping(w http.ResponseWriter, r *http.Request) {
 	if h.pngr == nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		h.serverError(w, r, http.StatusInternalServerError, "database is not configured", nil)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), time.Second)
 	defer cancel()
 	if err := h.pngr.PingContext(ctx); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		h.serverError(w, r, http.StatusInternalServerError, "database ping failed", err)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -176,7 +199,7 @@ func (h *Handler) ShortenBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	batchResults, conflict, err := h.svc.ShortenBatch(r.Context(), batchItems, userIDFromRequest(r))
 	if err != nil {
-		http.Error(w, "failed to generate id", http.StatusInternalServerError)
+		h.serverError(w, r, http.StatusInternalServerError, "failed to shorten batch", err)
 		return
 	}
 	results := make([]api.ShortenBatchResponseItem, len(batchResults))
@@ -188,7 +211,7 @@ func (h *Handler) ShortenBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	jsonData, err := json.Marshal(results)
 	if err != nil {
-		http.Error(w, "failed to marshal", http.StatusInternalServerError)
+		h.serverError(w, r, http.StatusInternalServerError, "failed to marshal response", err)
 		return
 	}
 	status := http.StatusCreated
@@ -205,15 +228,27 @@ func userIDFromRequest(r *http.Request) string {
 	return userID
 }
 
-func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
-	userID, ok := auth.UserIDFromContext(r.Context())
-	if !ok {
+func (h *Handler) requireUserID(w http.ResponseWriter, r *http.Request) (string, bool) {
+	userID, err := auth.UserIDFromContext(r.Context())
+	switch {
+	case errors.Is(err, auth.ErrUserIDInvalidType):
+		h.serverError(w, r, http.StatusInternalServerError, "internal error", err)
+		return "", false
+	case err != nil:
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return "", false
+	}
+	return userID, true
+}
+
+func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.requireUserID(w, r)
+	if !ok {
 		return
 	}
 	userURLs, err := h.svc.GetUserURLs(r.Context(), userID)
 	if err != nil {
-		http.Error(w, "failed to get user urls", http.StatusInternalServerError)
+		h.serverError(w, r, http.StatusInternalServerError, "failed to get user urls", err)
 		return
 	}
 	if len(userURLs) == 0 {
@@ -229,10 +264,46 @@ func (h *Handler) GetUserURLs(w http.ResponseWriter, r *http.Request) {
 	}
 	jsonData, err := json.Marshal(response)
 	if err != nil {
-		http.Error(w, "failed to marshal", http.StatusInternalServerError)
+		h.serverError(w, r, http.StatusInternalServerError, "failed to marshal response", err)
 		return
 	}
 	w.Header().Set(headerContentType, "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(jsonData)
+}
+
+func (h *Handler) DeleteUserURLs(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.requireUserID(w, r)
+	if !ok {
+		return
+	}
+	contentType := r.Header.Get(headerContentType)
+	if mediaType, _, err := mime.ParseMediaType(contentType); err != nil || mediaType != "application/json" {
+		http.Error(w, "incorrect content-type", http.StatusBadRequest)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	var ids []string
+	if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+			http.Error(w, "request entity too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, "incorrect request body", http.StatusBadRequest)
+		return
+	}
+	if len(ids) == 0 {
+		http.Error(w, "empty batch", http.StatusBadRequest)
+		return
+	}
+	err := h.del.Delete(r.Context(), userID, ids)
+	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		h.log.Debug().Err(err).Str("path", r.URL.Path).Msg("delete request abandoned by client")
+		return
+	case err != nil:
+		h.serverError(w, r, http.StatusServiceUnavailable, "service unavailable", err)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
 }

@@ -14,7 +14,9 @@ const (
 	defaultSecretKey       = "dev-secret"
 )
 
-var envKeys = []string{"SERVER_ADDRESS", "BASE_URL", "FILE_STORAGE_PATH", "DATABASE_DSN", "SECRET_KEY"}
+var envKeys = []string{"SERVER_ADDRESS", "BASE_URL", "FILE_STORAGE_PATH", "DATABASE_DSN", "SECRET_KEY",
+	"DELETE_BATCH_SIZE", "DELETE_FLUSH_INTERVAL", "DELETE_MAX_WORKERS",
+}
 
 func resetCLI(t *testing.T, args ...string) {
 	t.Helper()

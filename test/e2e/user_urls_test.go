@@ -82,7 +82,7 @@ func getUserURLs(t *testing.T, c *http.Client) (*http.Response, []api.UserURLRes
 func TestUserURLs_AllWaysOfShortening(t *testing.T) {
 	alice := newUserClient(t)
 	base := uniqueURL(t)
-	want := map[string]string{} // original -> short
+	want := map[string]string{}
 
 	resp, short := doAs(t, alice, http.MethodPost, "/", "text/plain", base+"/plain")
 	if resp.StatusCode != http.StatusCreated {

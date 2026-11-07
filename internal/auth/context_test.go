@@ -14,46 +14,45 @@ func TestUserIDFromContext(t *testing.T) {
 	userID := auth.NewUserID()
 
 	tests := []struct {
-		name   string
-		ctx    context.Context
-		wantID string
-		wantOK bool
+		name    string
+		ctx     context.Context
+		wantID  string
+		wantErr error
 	}{
 		{
 			name:   "user id set",
 			ctx:    auth.WithUserID(context.Background(), userID),
 			wantID: userID,
-			wantOK: true,
 		},
 		{
-			name:   "empty context",
-			ctx:    context.Background(),
-			wantID: "",
-			wantOK: false,
+			name:    "empty context",
+			ctx:     context.Background(),
+			wantErr: auth.ErrUserIDNotFound,
 		},
 		{
-			name:   "empty user id",
-			ctx:    auth.WithUserID(context.Background(), ""),
-			wantID: "",
-			wantOK: false,
+			name:    "empty user id",
+			ctx:     auth.WithUserID(context.Background(), ""),
+			wantErr: auth.ErrEmptyUserID,
 		},
 		{
-			name:   "foreign key from another package does not collide",
-			ctx:    context.WithValue(context.Background(), foreignKey("userID"), userID),
-			wantID: "",
-			wantOK: false,
+			name:    "foreign key from another package does not collide",
+			ctx:     context.WithValue(context.Background(), foreignKey("userID"), userID),
+			wantErr: auth.ErrUserIDNotFound,
 		},
 		{
 			name:   "overwritten by later value",
 			ctx:    auth.WithUserID(auth.WithUserID(context.Background(), "old"), userID),
 			wantID: userID,
-			wantOK: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			id, ok := auth.UserIDFromContext(tt.ctx)
-			assert.Equal(t, tt.wantOK, ok)
+			id, err := auth.UserIDFromContext(tt.ctx)
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
+			} else {
+				assert.NoError(t, err)
+			}
 			assert.Equal(t, tt.wantID, id)
 		})
 	}

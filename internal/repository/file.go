@@ -19,6 +19,7 @@ type record struct {
 	ShortURL    string `json:"short_url"`
 	OriginalURL string `json:"original_url"`
 	UserID      string `json:"user_id,omitempty"`
+	IsDeleted   bool   `json:"is_deleted,omitempty"`
 }
 
 const arrayEnd = "\n]\n"
@@ -30,12 +31,15 @@ type FileStorage struct {
 	mu    sync.Mutex
 	count int
 	end   int64
+	recs  []record
+	index map[string]int
 }
 
 func NewFileStorage(path string) (*FileStorage, error) {
 	s := &FileStorage{
-		path: path,
-		mem:  NewStorage(),
+		path:  path,
+		mem:   NewStorage(),
+		index: make(map[string]int),
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("create storage dir: %w", err)
@@ -44,6 +48,11 @@ func NewFileStorage(path string) (*FileStorage, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+func (s *FileStorage) remember(rec record) {
+	s.index[rec.ShortURL] = len(s.recs)
+	s.recs = append(s.recs, rec)
 }
 
 func (s *FileStorage) restore() error {
@@ -76,9 +85,11 @@ func (s *FileStorage) restore() error {
 			ShortID:     rec.ShortURL,
 			OriginalURL: rec.OriginalURL,
 			UserID:      rec.UserID,
+			DeletedFlag: rec.IsDeleted,
 		}); saveErr != nil {
 			return fmt.Errorf("restore record %s: %w", rec.ShortURL, saveErr)
 		}
+		s.remember(rec)
 		s.count++
 		s.end = dec.InputOffset()
 	}
@@ -91,7 +102,7 @@ func (s *FileStorage) restore() error {
 func (s *FileStorage) Save(ctx context.Context, url model.URL) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := s.mem.Load(ctx, url.ShortID); err == nil {
+	if _, err := s.mem.Load(ctx, url.ShortID); !errors.Is(err, ErrNotFound) {
 		return ErrAlreadyExists
 	}
 	if _, err := s.mem.GetShortURLByOriginalURL(ctx, url.OriginalURL); err == nil {
@@ -106,6 +117,7 @@ func (s *FileStorage) Save(ctx context.Context, url model.URL) error {
 	if err := s.appendRecords([]record{rec}); err != nil {
 		return err
 	}
+	s.remember(rec)
 	s.count++
 	return s.mem.Save(ctx, url)
 }
@@ -124,7 +136,7 @@ func (s *FileStorage) SaveBatch(ctx context.Context, urls []model.URL) error {
 	seenOriginal := make(map[string]struct{}, len(urls))
 	recs := make([]record, 0, len(urls))
 	for i, u := range urls {
-		if _, err := s.mem.Load(ctx, u.ShortID); err == nil {
+		if _, err := s.mem.Load(ctx, u.ShortID); !errors.Is(err, ErrNotFound) {
 			return ErrAlreadyExists
 		}
 		if _, err := s.mem.GetShortURLByOriginalURL(ctx, u.OriginalURL); err == nil {
@@ -148,6 +160,9 @@ func (s *FileStorage) SaveBatch(ctx context.Context, urls []model.URL) error {
 	if err := s.appendRecords(recs); err != nil {
 		return err
 	}
+	for _, rec := range recs {
+		s.remember(rec)
+	}
 	s.count += len(recs)
 	return s.mem.SaveBatch(ctx, urls)
 }
@@ -158,6 +173,57 @@ func (s *FileStorage) GetShortURLByOriginalURL(ctx context.Context, originalURL 
 
 func (s *FileStorage) GetURLsByUserID(ctx context.Context, userID string) ([]model.URL, error) {
 	return s.mem.GetURLsByUserID(ctx, userID)
+}
+
+func (s *FileStorage) DeleteURLs(ctx context.Context, reqs []model.DeleteRequest) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	changed := make([]int, 0, len(reqs))
+	for _, req := range reqs {
+		i, ok := s.index[req.ShortID]
+		if !ok || req.UserID == "" || s.recs[i].UserID != req.UserID || s.recs[i].IsDeleted {
+			continue
+		}
+		s.recs[i].IsDeleted = true
+		changed = append(changed, i)
+	}
+	if len(changed) == 0 {
+		return nil
+	}
+	if err := s.rewrite(); err != nil {
+		for _, i := range changed {
+			s.recs[i].IsDeleted = false
+		}
+		return err
+	}
+	return s.mem.DeleteURLs(ctx, reqs)
+}
+
+func (s *FileStorage) rewrite() error {
+	var buf []byte
+	for i, rec := range s.recs {
+		data, err := json.Marshal(rec)
+		if err != nil {
+			return fmt.Errorf("marshal record: %w", err)
+		}
+		prefix := ",\n  "
+		if i == 0 {
+			prefix = "[\n  "
+		}
+		buf = append(buf, prefix...)
+		buf = append(buf, data...)
+	}
+	buf = append(buf, arrayEnd...)
+
+	tmp := s.path + ".tmp"
+	if err := os.WriteFile(tmp, buf, 0o644); err != nil {
+		return fmt.Errorf("write storage file: %w", err)
+	}
+	if err := os.Rename(tmp, s.path); err != nil {
+		return fmt.Errorf("replace storage file: %w", err)
+	}
+	s.end = int64(len(buf) - len(arrayEnd))
+	return nil
 }
 
 func (s *FileStorage) appendRecords(recs []record) error {

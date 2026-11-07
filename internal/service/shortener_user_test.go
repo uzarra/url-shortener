@@ -80,7 +80,6 @@ func TestShortener_GetUserURLs_BuildsFullShortURL(t *testing.T) {
 	if err := storage.Save(context.Background(), model.URL{ShortID: "abc", OriginalURL: "http://yandex.ru", UserID: testUserA}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	// Базовый адрес со слешем на конце: в результате не должно быть двойного слеша.
 	s := NewShortener(storage, testBase+"/")
 
 	got, err := s.GetUserURLs(context.Background(), testUserA)

@@ -4,6 +4,7 @@ type URL struct {
 	ShortID     string
 	OriginalURL string
 	UserID      string
+	DeletedFlag bool
 }
 
 type BatchItem struct {
@@ -19,4 +20,9 @@ type BatchResult struct {
 type UserURL struct {
 	ShortURL    string
 	OriginalURL string
+}
+
+type DeleteRequest struct {
+	UserID  string
+	ShortID string
 }
