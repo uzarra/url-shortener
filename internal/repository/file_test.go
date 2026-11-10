@@ -88,7 +88,7 @@ func TestNewFileStorage(t *testing.T) {
 
 func TestFileStorage_SaveLoad(t *testing.T) {
 	s := newTestFileStorage(t, filepath.Join(t.TempDir(), "storage.json"))
-	if err := s.Save(t.Context(), "abc", "http://yandex.ru"); err != nil {
+	if err := s.Save(t.Context(), model.URL{ShortID: "abc", OriginalURL: "http://yandex.ru"}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 	got, err := s.Load(t.Context(), "abc")
@@ -103,10 +103,10 @@ func TestFileStorage_SaveLoad(t *testing.T) {
 func TestFileStorage_SaveDuplicate(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "storage.json")
 	s := newTestFileStorage(t, path)
-	if err := s.Save(t.Context(), "abc", "http://yandex.ru"); err != nil {
+	if err := s.Save(t.Context(), model.URL{ShortID: "abc", OriginalURL: "http://yandex.ru"}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	if err := s.Save(t.Context(), "abc", "http://ya.ru"); !errors.Is(err, ErrAlreadyExists) {
+	if err := s.Save(t.Context(), model.URL{ShortID: "abc", OriginalURL: "http://ya.ru"}); !errors.Is(err, ErrAlreadyExists) {
 		t.Fatalf("Save() duplicate error = %v, want %v", err, ErrAlreadyExists)
 	}
 	if got, _ := s.Load(t.Context(), "abc"); got != "http://yandex.ru" {
@@ -120,10 +120,10 @@ func TestFileStorage_SaveDuplicate(t *testing.T) {
 func TestFileStorage_SaveConflict(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "storage.json")
 	s := newTestFileStorage(t, path)
-	if err := s.Save(t.Context(), "abc", "http://yandex.ru"); err != nil {
+	if err := s.Save(t.Context(), model.URL{ShortID: "abc", OriginalURL: "http://yandex.ru"}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	if err := s.Save(t.Context(), "def", "http://yandex.ru"); !errors.Is(err, ErrConflict) {
+	if err := s.Save(t.Context(), model.URL{ShortID: "def", OriginalURL: "http://yandex.ru"}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("Save() same original error = %v, want %v", err, ErrConflict)
 	}
 	if records := readRecords(t, path); len(records) != 1 {
@@ -138,7 +138,7 @@ func TestFileStorage_SaveConflict(t *testing.T) {
 func TestFileStorage_SaveBatchConflict(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "storage.json")
 	s := newTestFileStorage(t, path)
-	if err := s.Save(t.Context(), "abc", "http://yandex.ru"); err != nil {
+	if err := s.Save(t.Context(), model.URL{ShortID: "abc", OriginalURL: "http://yandex.ru"}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 	err := s.SaveBatch(t.Context(), []model.URL{
@@ -159,7 +159,7 @@ func TestFileStorage_SaveBatchConflict(t *testing.T) {
 func TestFileStorage_SaveBatchConflictInsideBatch(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "storage.json")
 	s := newTestFileStorage(t, path)
-	if err := s.Save(t.Context(), "abc", "http://yandex.ru"); err != nil {
+	if err := s.Save(t.Context(), model.URL{ShortID: "abc", OriginalURL: "http://yandex.ru"}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 	err := s.SaveBatch(t.Context(), []model.URL{
@@ -190,7 +190,7 @@ func TestFileStorage_Restore(t *testing.T) {
 	}
 	s := newTestFileStorage(t, path)
 	for id, u := range urls {
-		if err := s.Save(t.Context(), id, u); err != nil {
+		if err := s.Save(t.Context(), model.URL{ShortID: id, OriginalURL: u}); err != nil {
 			t.Fatalf("Save(%q) error = %v", id, err)
 		}
 	}
@@ -211,10 +211,10 @@ func TestFileStorage_Restore(t *testing.T) {
 func TestFileStorage_FileFormat(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "storage.json")
 	s := newTestFileStorage(t, path)
-	if err := s.Save(t.Context(), "4rSPg8ap", "http://yandex.ru"); err != nil {
+	if err := s.Save(t.Context(), model.URL{ShortID: "4rSPg8ap", OriginalURL: "http://yandex.ru"}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	if err := s.Save(t.Context(), "edVPg3ks", "http://ya.ru"); err != nil {
+	if err := s.Save(t.Context(), model.URL{ShortID: "edVPg3ks", OriginalURL: "http://ya.ru"}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 
@@ -271,7 +271,7 @@ func TestFileStorage_AppendToExistingFile(t *testing.T) {
 			}
 			before := len(readRecords(t, path))
 			s := newTestFileStorage(t, path)
-			if err := s.Save(t.Context(), "newID123", "http://new.ru"); err != nil {
+			if err := s.Save(t.Context(), model.URL{ShortID: "newID123", OriginalURL: "http://new.ru"}); err != nil {
 				t.Fatalf("Save() error = %v", err)
 			}
 			records := readRecords(t, path)
@@ -290,11 +290,11 @@ func TestFileStorage_AppendToExistingFile(t *testing.T) {
 func TestFileStorage_UUIDContinuesAfterRestore(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "storage.json")
 	s := newTestFileStorage(t, path)
-	_ = s.Save(t.Context(), "a", "http://a.ru")
-	_ = s.Save(t.Context(), "b", "http://b.ru")
+	_ = s.Save(t.Context(), model.URL{ShortID: "a", OriginalURL: "http://a.ru"})
+	_ = s.Save(t.Context(), model.URL{ShortID: "b", OriginalURL: "http://b.ru"})
 
 	restored := newTestFileStorage(t, path)
-	if err := restored.Save(t.Context(), "c", "http://c.ru"); err != nil {
+	if err := restored.Save(t.Context(), model.URL{ShortID: "c", OriginalURL: "http://c.ru"}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 	records := readRecords(t, path)
@@ -309,7 +309,7 @@ func TestFileStorage_UUIDContinuesAfterRestore(t *testing.T) {
 func TestNewFileStorage_CreatesDir(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "a", "b", "storage.json")
 	s := newTestFileStorage(t, path)
-	if err := s.Save(t.Context(), "abc", "http://yandex.ru"); err != nil {
+	if err := s.Save(t.Context(), model.URL{ShortID: "abc", OriginalURL: "http://yandex.ru"}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 	if records := readRecords(t, path); len(records) != 1 {
@@ -333,7 +333,7 @@ func TestFileStorage_SaveWriteError(t *testing.T) {
 	if err := os.Mkdir(path, 0o755); err != nil {
 		t.Fatalf("prepare dir: %v", err)
 	}
-	if err := s.Save(t.Context(), "abc", "http://yandex.ru"); err == nil {
+	if err := s.Save(t.Context(), model.URL{ShortID: "abc", OriginalURL: "http://yandex.ru"}); err == nil {
 		t.Fatal("Save() error = nil, want error")
 	}
 	if _, err := s.Load(t.Context(), "abc"); !errors.Is(err, ErrNotFound) {
@@ -351,7 +351,7 @@ func TestFileStorage_ConcurrentSave(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			id := fmt.Sprintf("id%d", i)
-			if err := s.Save(t.Context(), id, "http://example"+id+".com"); err != nil {
+			if err := s.Save(t.Context(), model.URL{ShortID: id, OriginalURL: "http://example" + id + ".com"}); err != nil {
 				t.Errorf("Save(%q) error = %v", id, err)
 			}
 		}()
@@ -365,7 +365,7 @@ func TestFileStorage_ConcurrentSave(t *testing.T) {
 func TestFileStorage_SaveBatch(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "storage.json")
 	s := newTestFileStorage(t, path)
-	if err := s.Save(t.Context(), "4rSPg8ap", "http://yandex.ru"); err != nil {
+	if err := s.Save(t.Context(), model.URL{ShortID: "4rSPg8ap", OriginalURL: "http://yandex.ru"}); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
 	urls := []model.URL{
@@ -446,7 +446,7 @@ func TestFileStorage_SaveBatchDuplicate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "storage.json")
 			s := newTestFileStorage(t, path)
-			if err := s.Save(t.Context(), "abc", "http://yandex.ru"); err != nil {
+			if err := s.Save(t.Context(), model.URL{ShortID: "abc", OriginalURL: "http://yandex.ru"}); err != nil {
 				t.Fatalf("Save() error = %v", err)
 			}
 			if err := s.SaveBatch(t.Context(), tt.urls); !errors.Is(err, ErrAlreadyExists) {

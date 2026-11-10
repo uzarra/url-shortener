@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	insertURLQuery         = "INSERT INTO urls (short_url, original_url) VALUES ($1, $2)"
-	insertURLsBatchQuery   = "INSERT INTO urls (short_url, original_url) SELECT * FROM unnest($1::text[], $2::text[])"
+	insertURLQuery         = "INSERT INTO urls (short_url, original_url, user_id) VALUES ($1, $2, NULLIF($3, '')::uuid)"
+	insertURLsBatchQuery   = "INSERT INTO urls (short_url, original_url, user_id) SELECT s, o, NULLIF(u, '')::uuid FROM unnest($1::text[], $2::text[], $3::text[]) AS t(s, o, u)"
+	deleteURLsBatchQuery   = "UPDATE urls SET is_deleted = TRUE FROM unnest($1::text[], $2::text[]) AS d(short_url, user_id) WHERE urls.short_url = d.short_url AND urls.user_id = d.user_id::uuid AND NOT is_deleted"
 	originalURLUniqueIndex = "urls_original_url_uniq"
 )
 
@@ -36,8 +37,8 @@ func NewPostgresStorage(db *sql.DB) (*PostgresStorage, error) {
 	}, nil
 }
 
-func (s *PostgresStorage) Save(ctx context.Context, id string, originalURL string) error {
-	_, err := s.db.ExecContext(ctx, insertURLQuery, id, originalURL)
+func (s *PostgresStorage) Save(ctx context.Context, url model.URL) error {
+	_, err := s.db.ExecContext(ctx, insertURLQuery, url.ShortID, url.OriginalURL, url.UserID)
 	if err != nil {
 		return mapInsertError(err)
 	}
@@ -46,12 +47,16 @@ func (s *PostgresStorage) Save(ctx context.Context, id string, originalURL strin
 
 func (s *PostgresStorage) Load(ctx context.Context, id string) (string, error) {
 	var originalURL string
-	err := s.db.QueryRowContext(ctx, "SELECT original_url FROM urls WHERE short_url = $1", id).Scan(&originalURL)
+	var deletedFlag bool
+	err := s.db.QueryRowContext(ctx, "SELECT original_url, is_deleted FROM urls WHERE short_url = $1", id).Scan(&originalURL, &deletedFlag)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotFound
 	}
 	if err != nil {
 		return "", fmt.Errorf("select url: %w", err)
+	}
+	if deletedFlag {
+		return "", ErrDeleted
 	}
 	return originalURL, nil
 }
@@ -62,11 +67,13 @@ func (s *PostgresStorage) SaveBatch(ctx context.Context, urls []model.URL) error
 	}
 	ids := make([]string, len(urls))
 	originals := make([]string, len(urls))
+	userIDs := make([]string, len(urls))
 	for i, u := range urls {
 		ids[i] = u.ShortID
 		originals[i] = u.OriginalURL
+		userIDs[i] = u.UserID
 	}
-	if _, err := s.db.ExecContext(ctx, insertURLsBatchQuery, ids, originals); err != nil {
+	if _, err := s.db.ExecContext(ctx, insertURLsBatchQuery, ids, originals, userIDs); err != nil {
 		return mapInsertError(err)
 	}
 	return nil
@@ -82,6 +89,49 @@ func (s *PostgresStorage) GetShortURLByOriginalURL(ctx context.Context, original
 		return "", fmt.Errorf("select url: %w", err)
 	}
 	return shortURL, nil
+}
+
+func (s *PostgresStorage) GetURLsByUserID(ctx context.Context, userID string) ([]model.URL, error) {
+	if userID == "" {
+		return []model.URL{}, nil
+	}
+	rows, err := s.db.QueryContext(ctx, "SELECT short_url, original_url FROM urls WHERE user_id = $1 AND NOT is_deleted ORDER BY id", userID)
+	if err != nil {
+		return nil, fmt.Errorf("select urls: %w", err)
+	}
+	defer rows.Close()
+	urls := make([]model.URL, 0)
+	for rows.Next() {
+		var u model.URL
+		if err := rows.Scan(&u.ShortID, &u.OriginalURL); err != nil {
+			return nil, fmt.Errorf("row scan: %w", err)
+		}
+		u.UserID = userID
+		urls = append(urls, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows: %w", err)
+	}
+	return urls, nil
+}
+
+func (s *PostgresStorage) DeleteURLs(ctx context.Context, reqs []model.DeleteRequest) error {
+	var shortIDs []string
+	var userIDs []string
+	for _, req := range reqs {
+		if req.UserID == "" {
+			continue
+		}
+		shortIDs = append(shortIDs, req.ShortID)
+		userIDs = append(userIDs, req.UserID)
+	}
+	if len(shortIDs) == 0 {
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx, deleteURLsBatchQuery, shortIDs, userIDs); err != nil {
+		return fmt.Errorf("delete urls: %w", err)
+	}
+	return nil
 }
 
 func OpenPostgres(dsn string) (*sql.DB, error) {

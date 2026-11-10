@@ -9,3 +9,8 @@
 - откатывать изменения при необходимости
 
 Тема миграций будет подробно изучаться дальше по курсу.
+
+```bash
+brew install golang-migrate
+migrate create -ext sql -dir migrations -seq urls_user_id
+```

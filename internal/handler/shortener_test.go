@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
+	"github.com/uzarra/url-shortener/internal/auth"
 	"github.com/uzarra/url-shortener/internal/model"
 	"github.com/uzarra/url-shortener/internal/service"
 )
@@ -26,7 +27,7 @@ func TestHandler_Expand_BadId(t *testing.T) {
 	rctx.URLParams.Add("id", "")
 	badIDRequest = badIDRequest.WithContext(context.WithValue(badIDRequest.Context(), chi.RouteCtxKey, rctx))
 	rec := httptest.NewRecorder()
-	handler := New(newTestShortener(), &testPinger{})
+	handler := New(newTestShortener(), nil, &testPinger{}, zerolog.Nop())
 	handler.Expand(rec, badIDRequest)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
@@ -37,7 +38,7 @@ func TestHandler_Expand_ExpandFails(t *testing.T) {
 	rctx.URLParams.Add("id", "qwe123qw")
 	badIDRequest = badIDRequest.WithContext(context.WithValue(badIDRequest.Context(), chi.RouteCtxKey, rctx))
 	rec := httptest.NewRecorder()
-	handler := New(newBadTestShortener(), &testPinger{})
+	handler := New(newBadTestShortener(), nil, &testPinger{}, zerolog.Nop())
 	handler.Expand(rec, badIDRequest)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
@@ -48,7 +49,7 @@ func TestHandler_Expand(t *testing.T) {
 	rctx.URLParams.Add("id", "qwe123qw")
 	goodRequest = goodRequest.WithContext(context.WithValue(goodRequest.Context(), chi.RouteCtxKey, rctx))
 	rec := httptest.NewRecorder()
-	handler := New(newTestShortener(), &testPinger{})
+	handler := New(newTestShortener(), nil, &testPinger{}, zerolog.Nop())
 	handler.Expand(rec, goodRequest)
 	assert.Equal(t, http.StatusTemporaryRedirect, rec.Code)
 	assert.Equal(t, "https://yandex.ru", rec.Header().Get("Location"))
@@ -58,7 +59,7 @@ func TestHandler_Shorten_BadBody(t *testing.T) {
 	noBodyRequest := httptest.NewRequest(http.MethodPost, "/", nil)
 	noBodyRequest.Header.Set("Content-Type", "text/plain")
 	rec := httptest.NewRecorder()
-	handler := New(newTestShortener(), &testPinger{})
+	handler := New(newTestShortener(), nil, &testPinger{}, zerolog.Nop())
 	handler.Shorten(rec, noBodyRequest)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
@@ -68,7 +69,7 @@ func TestHandler_Shorten_EmptyBody(t *testing.T) {
 		bytes.NewReader([]byte(``)))
 	emptyBodyRequest.Header.Set("Content-Type", "text/plain")
 	rec := httptest.NewRecorder()
-	handler := New(newTestShortener(), &testPinger{})
+	handler := New(newTestShortener(), nil, &testPinger{}, zerolog.Nop())
 	handler.Shorten(rec, emptyBodyRequest)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
@@ -78,7 +79,7 @@ func TestHandler_Shorten_ShortenFails(t *testing.T) {
 		bytes.NewReader([]byte(`http://test.ru`)))
 	correctRequest.Header.Set("Content-Type", "text/plain")
 	rec := httptest.NewRecorder()
-	handler := New(newBadTestShortener(), &testPinger{})
+	handler := New(newBadTestShortener(), nil, &testPinger{}, zerolog.Nop())
 	handler.Shorten(rec, correctRequest)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -88,7 +89,7 @@ func TestHandler_Shorten(t *testing.T) {
 		bytes.NewReader([]byte(`http://test.ru`)))
 	correctRequest.Header.Set("Content-Type", "text/plain; charset=utf-8")
 	rec := httptest.NewRecorder()
-	handler := New(newTestShortener(), &testPinger{})
+	handler := New(newTestShortener(), nil, &testPinger{}, zerolog.Nop())
 	handler.Shorten(rec, correctRequest)
 	mediaType, _, _ := mime.ParseMediaType(rec.Header().Get("Content-Type"))
 	assert.Equal(t, http.StatusCreated, rec.Code)
@@ -101,7 +102,7 @@ func TestHandler_Shorten_Conflict(t *testing.T) {
 		bytes.NewReader([]byte(`http://test.ru`)))
 	request.Header.Set("Content-Type", "text/plain")
 	rec := httptest.NewRecorder()
-	handler := New(&conflictTestShortener{}, &testPinger{})
+	handler := New(&conflictTestShortener{}, nil, &testPinger{}, zerolog.Nop())
 	handler.Shorten(rec, request)
 	mediaType, _, _ := mime.ParseMediaType(rec.Header().Get("Content-Type"))
 	assert.Equal(t, http.StatusConflict, rec.Code)
@@ -114,7 +115,7 @@ func TestHandler_ShortenInBody_BadContentType(t *testing.T) {
 		bytes.NewReader([]byte(`{"url":"http://test.ru"}`)))
 	badContentTypeRequest.Header.Set("Content-Type", "text/plain")
 	rec := httptest.NewRecorder()
-	handler := New(newTestShortener(), &testPinger{})
+	handler := New(newTestShortener(), nil, &testPinger{}, zerolog.Nop())
 	handler.ShortenInBody(rec, badContentTypeRequest)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
@@ -124,7 +125,7 @@ func TestHandler_ShortenInBody_BadJSON(t *testing.T) {
 		bytes.NewReader([]byte(`not json`)))
 	badJSONRequest.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	handler := New(newTestShortener(), &testPinger{})
+	handler := New(newTestShortener(), nil, &testPinger{}, zerolog.Nop())
 	handler.ShortenInBody(rec, badJSONRequest)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
@@ -134,7 +135,7 @@ func TestHandler_ShortenInBody_EmptyURL(t *testing.T) {
 		bytes.NewReader([]byte(`{"url":"  "}`)))
 	emptyURLRequest.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	handler := New(newTestShortener(), &testPinger{})
+	handler := New(newTestShortener(), nil, &testPinger{}, zerolog.Nop())
 	handler.ShortenInBody(rec, emptyURLRequest)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
@@ -145,7 +146,7 @@ func TestHandler_ShortenInBody_TooLargeBody(t *testing.T) {
 		bytes.NewReader([]byte(largeBody)))
 	tooLargeRequest.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	handler := New(newTestShortener(), &testPinger{})
+	handler := New(newTestShortener(), nil, &testPinger{}, zerolog.Nop())
 	handler.ShortenInBody(rec, tooLargeRequest)
 	assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
 }
@@ -155,7 +156,7 @@ func TestHandler_ShortenInBody_ShortenFails(t *testing.T) {
 		bytes.NewReader([]byte(`{"url":"http://test.ru"}`)))
 	correctRequest.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	handler := New(newBadTestShortener(), &testPinger{})
+	handler := New(newBadTestShortener(), nil, &testPinger{}, zerolog.Nop())
 	handler.ShortenInBody(rec, correctRequest)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
@@ -165,7 +166,7 @@ func TestHandler_ShortenInBody(t *testing.T) {
 		bytes.NewReader([]byte(`{"url":"http://test.ru"}`)))
 	correctRequest.Header.Set("Content-Type", "application/json; charset=utf-8")
 	rec := httptest.NewRecorder()
-	handler := New(newTestShortener(), &testPinger{})
+	handler := New(newTestShortener(), nil, &testPinger{}, zerolog.Nop())
 	handler.ShortenInBody(rec, correctRequest)
 	mediaType, _, _ := mime.ParseMediaType(rec.Header().Get("Content-Type"))
 	assert.Equal(t, http.StatusCreated, rec.Code)
@@ -178,7 +179,7 @@ func TestHandler_ShortenInBody_Conflict(t *testing.T) {
 		bytes.NewReader([]byte(`{"url":"http://test.ru"}`)))
 	request.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	handler := New(&conflictTestShortener{}, &testPinger{})
+	handler := New(&conflictTestShortener{}, nil, &testPinger{}, zerolog.Nop())
 	handler.ShortenInBody(rec, request)
 	mediaType, _, _ := mime.ParseMediaType(rec.Header().Get("Content-Type"))
 	assert.Equal(t, http.StatusConflict, rec.Code)
@@ -212,7 +213,7 @@ func TestHandler_ShortenBatch_BadRequest(t *testing.T) {
 				bytes.NewReader([]byte(tt.body)))
 			request.Header.Set("Content-Type", tt.contentType)
 			rec := httptest.NewRecorder()
-			handler := New(newTestShortener(), &testPinger{})
+			handler := New(newTestShortener(), nil, &testPinger{}, zerolog.Nop())
 			handler.ShortenBatch(rec, request)
 			assert.Equal(t, tt.want, rec.Code)
 		})
@@ -224,7 +225,7 @@ func TestHandler_ShortenBatch_ShortenFails(t *testing.T) {
 		bytes.NewReader([]byte(`[{"correlation_id":"1","original_url":"http://test.ru"}]`)))
 	request.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	handler := New(newBadTestShortener(), &testPinger{})
+	handler := New(newBadTestShortener(), nil, &testPinger{}, zerolog.Nop())
 	handler.ShortenBatch(rec, request)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.NotContains(t, rec.Body.String(), "[")
@@ -238,7 +239,7 @@ func TestHandler_ShortenBatch(t *testing.T) {
 		]`)))
 	request.Header.Set("Content-Type", "application/json; charset=utf-8")
 	rec := httptest.NewRecorder()
-	handler := New(newTestShortener(), &testPinger{})
+	handler := New(newTestShortener(), nil, &testPinger{}, zerolog.Nop())
 	handler.ShortenBatch(rec, request)
 	mediaType, _, _ := mime.ParseMediaType(rec.Header().Get("Content-Type"))
 	assert.Equal(t, http.StatusCreated, rec.Code)
@@ -257,7 +258,7 @@ func TestHandler_ShortenBatch_Conflict(t *testing.T) {
 		]`)))
 	request.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	handler := New(&conflictTestShortener{}, &testPinger{})
+	handler := New(&conflictTestShortener{}, nil, &testPinger{}, zerolog.Nop())
 	handler.ShortenBatch(rec, request)
 	mediaType, _, _ := mime.ParseMediaType(rec.Header().Get("Content-Type"))
 	assert.Equal(t, http.StatusConflict, rec.Code)
@@ -279,7 +280,8 @@ func TestHandler_ShortenBatch_Gzip(t *testing.T) {
 	request.Header.Set("Content-Encoding", "gzip")
 	request.Header.Set("Accept-Encoding", "gzip")
 	rec := httptest.NewRecorder()
-	router := NewRouter(New(newTestShortener(), &testPinger{}), zerolog.Nop())
+	authManager := auth.NewManager([]byte("test"), auth.TokenTTL)
+	router := NewRouter(New(newTestShortener(), nil, &testPinger{}, zerolog.Nop()), zerolog.Nop(), authManager)
 	router.ServeHTTP(rec, request)
 
 	assert.Equal(t, http.StatusCreated, rec.Code)
@@ -321,7 +323,7 @@ func TestHandler_Ping(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, "/ping", nil)
 			rec := httptest.NewRecorder()
-			handler := New(newTestShortener(), tt.pinger)
+			handler := New(newTestShortener(), nil, tt.pinger, zerolog.Nop())
 			handler.Ping(rec, request)
 			assert.Equal(t, tt.want, rec.Code)
 		})
@@ -331,7 +333,9 @@ func TestHandler_Ping(t *testing.T) {
 func TestNew(t *testing.T) {
 	type args struct {
 		svc  Shortener
+		del  Deleter
 		pngr Pinger
+		log  zerolog.Logger
 	}
 	tests := []struct {
 		name string
@@ -342,17 +346,21 @@ func TestNew(t *testing.T) {
 			name: "ok",
 			args: args{
 				svc:  newTestShortener(),
+				del:  &testDeleter{},
 				pngr: &testPinger{},
+				log:  zerolog.Nop(),
 			},
 			want: &Handler{
 				svc:  newTestShortener(),
+				del:  &testDeleter{},
 				pngr: &testPinger{},
+				log:  zerolog.Nop(),
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := New(tt.args.svc, tt.args.pngr); !reflect.DeepEqual(got, tt.want) {
+			if got := New(tt.args.svc, tt.args.del, tt.args.pngr, tt.args.log); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("New() = %v, want %v", got, tt.want)
 			}
 		})
@@ -366,15 +374,15 @@ func newTestShortener() Shortener {
 	return &testShortener{}
 }
 
-func (t *testShortener) Shorten(_ context.Context, _ string) (string, error) {
+func (t *testShortener) Shorten(_ context.Context, _ string, _ string) (string, error) {
 	return "http://localhost:8080/qwe123qw", nil
 }
 
-func (t *testShortener) Expand(_ context.Context, id string) (string, error) {
+func (t *testShortener) Expand(_ context.Context, _ string) (string, error) {
 	return "https://yandex.ru", nil
 }
 
-func (t *testShortener) ShortenBatch(_ context.Context, batchItems []model.BatchItem) ([]model.BatchResult, bool, error) {
+func (t *testShortener) ShortenBatch(_ context.Context, batchItems []model.BatchItem, _ string) ([]model.BatchResult, bool, error) {
 	results := make([]model.BatchResult, len(batchItems))
 	for i, item := range batchItems {
 		results[i] = model.BatchResult{
@@ -385,14 +393,22 @@ func (t *testShortener) ShortenBatch(_ context.Context, batchItems []model.Batch
 	return results, false, nil
 }
 
+func (t *testShortener) GetUserURLs(_ context.Context, _ string) ([]model.UserURL, error) {
+	return []model.UserURL{}, nil
+}
+
 type badTestShortener struct {
+}
+
+func (t *badTestShortener) GetUserURLs(_ context.Context, _ string) ([]model.UserURL, error) {
+	return nil, errors.New("bad")
 }
 
 func newBadTestShortener() Shortener {
 	return &badTestShortener{}
 }
 
-func (t *badTestShortener) Shorten(_ context.Context, _ string) (string, error) {
+func (t *badTestShortener) Shorten(_ context.Context, _ string, _ string) (string, error) {
 	return "", errors.New("bad")
 }
 
@@ -400,7 +416,7 @@ func (t *badTestShortener) Expand(_ context.Context, _ string) (string, error) {
 	return "", errors.New("bad")
 }
 
-func (t *badTestShortener) ShortenBatch(_ context.Context, _ []model.BatchItem) ([]model.BatchResult, bool, error) {
+func (t *badTestShortener) ShortenBatch(_ context.Context, _ []model.BatchItem, _ string) ([]model.BatchResult, bool, error) {
 	return nil, false, errors.New("bad")
 }
 
@@ -408,12 +424,12 @@ type conflictTestShortener struct {
 	testShortener
 }
 
-func (t *conflictTestShortener) Shorten(_ context.Context, _ string) (string, error) {
+func (t *conflictTestShortener) Shorten(_ context.Context, _ string, _ string) (string, error) {
 	return "http://localhost:8080/existing", service.ErrConflict
 }
 
-func (t *conflictTestShortener) ShortenBatch(ctx context.Context, batchItems []model.BatchItem) ([]model.BatchResult, bool, error) {
-	results, _, err := t.testShortener.ShortenBatch(ctx, batchItems)
+func (t *conflictTestShortener) ShortenBatch(ctx context.Context, batchItems []model.BatchItem, userID string) ([]model.BatchResult, bool, error) {
+	results, _, err := t.testShortener.ShortenBatch(ctx, batchItems, userID)
 	return results, true, err
 }
 
@@ -423,4 +439,12 @@ type testPinger struct {
 
 func (p *testPinger) PingContext(_ context.Context) error {
 	return p.err
+}
+
+type testDeleter struct {
+	err error
+}
+
+func (d *testDeleter) Delete(_ context.Context, _ string, _ []string) error {
+	return d.err
 }

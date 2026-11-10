@@ -19,12 +19,14 @@ const (
 var ErrIncorrectInput = errors.New("input is incorrect")
 var ErrIDGeneration = errors.New("id generation failed")
 var ErrConflict = errors.New("url already shortened")
+var ErrDeleted = errors.New("url deleted")
 
 type Repository interface {
-	Save(ctx context.Context, id string, url string) error
+	Save(ctx context.Context, url model.URL) error
 	Load(ctx context.Context, id string) (string, error)
 	SaveBatch(ctx context.Context, urls []model.URL) error
 	GetShortURLByOriginalURL(ctx context.Context, originalURL string) (string, error)
+	GetURLsByUserID(ctx context.Context, userID string) ([]model.URL, error)
 }
 
 type Shortener struct {
@@ -39,7 +41,7 @@ func NewShortener(repo Repository, baseURL string) *Shortener {
 	}
 }
 
-func (s *Shortener) Shorten(ctx context.Context, url string) (string, error) {
+func (s *Shortener) Shorten(ctx context.Context, url string, userID string) (string, error) {
 	if url == "" {
 		return "", ErrIncorrectInput
 	}
@@ -48,7 +50,7 @@ func (s *Shortener) Shorten(ctx context.Context, url string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		err = s.repo.Save(ctx, id, url)
+		err = s.repo.Save(ctx, model.URL{ShortID: id, OriginalURL: url, UserID: userID})
 		if errors.Is(err, repository.ErrAlreadyExists) {
 			continue
 		}
@@ -72,13 +74,16 @@ func (s *Shortener) Expand(ctx context.Context, id string) (string, error) {
 		return "", ErrIncorrectInput
 	}
 	originalURL, err := s.repo.Load(ctx, id)
+	if errors.Is(err, repository.ErrDeleted) {
+		return "", ErrDeleted
+	}
 	if err != nil {
 		return "", err
 	}
 	return originalURL, nil
 }
 
-func (s *Shortener) ShortenBatch(ctx context.Context, batchItems []model.BatchItem) ([]model.BatchResult, bool, error) {
+func (s *Shortener) ShortenBatch(ctx context.Context, batchItems []model.BatchItem, userID string) ([]model.BatchResult, bool, error) {
 	if !isValid(batchItems) {
 		return nil, false, ErrIncorrectInput
 	}
@@ -104,7 +109,7 @@ func (s *Shortener) ShortenBatch(ctx context.Context, batchItems []model.BatchIt
 				return nil, false, err
 			}
 			ids[item.OriginalURL] = id
-			urls = append(urls, model.URL{ShortID: id, OriginalURL: item.OriginalURL})
+			urls = append(urls, model.URL{ShortID: id, OriginalURL: item.OriginalURL, UserID: userID})
 		}
 		err := s.repo.SaveBatch(ctx, urls)
 		if errors.Is(err, repository.ErrAlreadyExists) || errors.Is(err, repository.ErrConflict) {
@@ -134,6 +139,24 @@ func (s *Shortener) GetShortURLByOriginalURL(ctx context.Context, originalURL st
 		return "", err
 	}
 	return s.baseURL + "/" + shortURL, nil
+}
+
+func (s *Shortener) GetUserURLs(ctx context.Context, userID string) ([]model.UserURL, error) {
+	if userID == "" {
+		return nil, ErrIncorrectInput
+	}
+	urls, err := s.repo.GetURLsByUserID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]model.UserURL, len(urls))
+	for i, u := range urls {
+		result[i] = model.UserURL{
+			ShortURL:    s.baseURL + "/" + u.ShortID,
+			OriginalURL: u.OriginalURL,
+		}
+	}
+	return result, nil
 }
 
 func generateID() (string, error) {
